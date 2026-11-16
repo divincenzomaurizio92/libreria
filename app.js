@@ -18,6 +18,10 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* ================= 1. DATI SALVATI ================= */
 
+/* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
+   così il telefono scarica i file nuovi invece di usare quelli in memoria. */
+const APP_VERSION = 4;
+
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
   'Narrativa', 'Giallo', 'Thriller', 'Romanzo storico', 'Romance', 'Fantasy', 'Fantascienza', 'Horror',
@@ -752,6 +756,7 @@ function renderSettings() {
   const n = state.books.length;
   $('settings-info').textContent = (n === 1 ? '1 libro salvato' : n + ' libri salvati')
     + ' su questo telefono. Per ora i dati restano solo qui: scarica un backup ogni tanto.';
+  $('app-version').textContent = 'Versione ' + APP_VERSION;
   $('gkey').value = googleKey();
   $('genre-list').innerHTML = state.genres.map((g, i) => {
     const used = state.books.filter((b) => (b.genres || []).includes(g)).length;

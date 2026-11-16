@@ -101,6 +101,11 @@ textarea { resize: vertical; }
 }
 .top-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .count { color: var(--muted); font-size: 15px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 12px; padding: 4px; border-radius: var(--radius); background: var(--line); }
+.tab { min-height: 42px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); font: 600 16px/1 var(--font-body); cursor: pointer; font-variant-numeric: tabular-nums; }
+.tab.on { background: var(--surface); }
+.tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.tag.wish { background: var(--warn-soft); color: var(--warn); }
 .tools { display: flex; gap: 8px; margin-top: 12px; }
 .tools input { flex: 1; min-width: 0; }
 .tools select { width: auto; flex: 0 0 auto; max-width: 46%; }
@@ -226,3 +231,4 @@ textarea { resize: vertical; }
   .sheet { animation: rise .18s ease-out; }
   @keyframes rise { from { transform: translateY(12px); } to { transform: none; } }
 }
+.btn:disabled { opacity: .55; cursor: default; }

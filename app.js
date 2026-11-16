@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -30,7 +30,11 @@ const DEFAULT_GENRES = [
   'Economia', 'Arte', 'Cucina', 'Viaggi',
 ];
 
-let state = { books: [], genres: [...DEFAULT_GENRES] };
+/* Liste desideri: un libro ha il campo "list" vuoto se è in libreria,
+   oppure il nome della lista desideri in cui si trova. */
+const DEFAULT_WISHLISTS = ['Lista Elena', 'Lista Maurizio', 'Regali', 'Tommaso'];
+
+let state = { books: [], genres: [...DEFAULT_GENRES], wishlists: [...DEFAULT_WISHLISTS] };
 
 function loadState() {
   try {
@@ -39,6 +43,7 @@ function loadState() {
       const data = JSON.parse(raw);
       state.books = Array.isArray(data.books) ? data.books : [];
       state.genres = Array.isArray(data.genres) && data.genres.length ? data.genres : [...DEFAULT_GENRES];
+      state.wishlists = Array.isArray(data.wishlists) ? data.wishlists : [...DEFAULT_WISHLISTS];
     }
   } catch (e) {
     console.warn('Lettura dei dati non riuscita', e);
@@ -334,6 +339,8 @@ const firstAuthor = (authors) => String(authors || '').split(',')[0].trim();
 /* ================= 5. ELENCO DEI LIBRI ================= */
 
 let filterGenre = '';
+let viewMode = 'library'; // 'library' = libri posseduti, 'wish' = liste desideri
+let filterList = '';
 
 function coverHtml(book, big) {
   const initial = esc((book.title || '?').trim().charAt(0).toUpperCase() || '?');
@@ -349,7 +356,8 @@ function isIncomplete(b) {
 
 function bookRowHtml(b, attr) {
   const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : ''].filter(Boolean).join(' · ');
-  const tags = (b.genres || []).map((g) => `<span class="tag">${esc(g)}</span>`).join('');
+  const tags = (b.list ? `<span class="tag wish">${esc(b.list)}</span>` : '')
+    + (b.genres || []).map((g) => `<span class="tag">${esc(g)}</span>`).join('');
   return `<button class="book" ${attr}>
     ${coverHtml(b)}
     <span class="book-info">
@@ -357,7 +365,7 @@ function bookRowHtml(b, attr) {
       ${b.authors ? `<span class="book-author">${esc(b.authors)}</span>` : ''}
       ${meta ? `<span class="book-meta">${esc(meta)}</span>` : ''}
       ${tags ? `<span class="book-tags">${tags}</span>` : ''}
-      ${b.id && isIncomplete(b) ? '<span class="missing-dot">Dati da completare</span>' : ''}
+      ${b.id && !b.list && isIncomplete(b) ? '<span class="missing-dot">Dati da completare</span>' : ''}
     </span>
   </button>`;
 }
@@ -365,8 +373,13 @@ function bookRowHtml(b, attr) {
 function renderList() {
   const q = $('search').value.trim().toLowerCase();
   const sort = $('sort').value;
-  let books = state.books.filter((b) => {
-    if (filterGenre && !(b.genres || []).includes(filterGenre)) return false;
+  const wish = viewMode === 'wish';
+  const owned = state.books.filter((b) => !b.list);
+  const wished = state.books.filter((b) => b.list);
+  const base = wish ? wished : owned;
+  let books = base.filter((b) => {
+    if (wish && filterList && b.list !== filterList) return false;
+    if (!wish && filterGenre && !(b.genres || []).includes(filterGenre)) return false;
     if (!q) return true;
     return [b.title, b.authors, b.publisher, b.isbn, b.notes].some((x) => String(x || '').toLowerCase().includes(q));
   });
@@ -375,20 +388,36 @@ function renderList() {
   else if (sort === 'author') books.sort(byText('authors'));
   else books.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 
-  const total = state.books.length;
-  $('count').textContent = total === 0 ? 'Nessun libro' : total === 1 ? '1 libro' : total + ' libri'
-    + (books.length !== total ? ' · ' + books.length + ' mostrati' : '');
+  $('tab-library').textContent = 'Libreria (' + owned.length + ')';
+  $('tab-wish').textContent = 'Desideri (' + wished.length + ')';
+  for (const [id, on] of [['tab-library', !wish], ['tab-wish', wish]]) {
+    $(id).classList.toggle('on', on);
+    $(id).setAttribute('aria-selected', on);
+  }
 
-  // Filtri: solo i generi usati almeno una volta.
-  const used = state.genres.filter((g) => state.books.some((b) => (b.genres || []).includes(g)));
-  if (filterGenre && !used.includes(filterGenre)) filterGenre = '';
-  $('filters').innerHTML = used.length
-    ? [`<button class="chip${filterGenre ? '' : ' on'}" data-genre="">Tutti</button>`]
-        .concat(used.map((g) => `<button class="chip${filterGenre === g ? ' on' : ''}" data-genre="${esc(g)}">${esc(g)}</button>`)).join('')
-    : '';
+  const total = base.length;
+  const one = wish ? '1 desiderio' : '1 libro';
+  const many = wish ? ' desideri' : ' libri';
+  $('count').textContent = total === 0 ? (wish ? 'Nessun desiderio' : 'Nessun libro')
+    : (total === 1 ? one : total + many) + (books.length !== total ? ' · ' + books.length + ' mostrati' : '');
+
+  // Filtri: in libreria i generi usati, nei desideri le liste.
+  const chip = (value, label, on) => `<button class="chip${on ? ' on' : ''}" data-genre="${esc(value)}">${esc(label)}</button>`;
+  if (wish) {
+    if (filterList && !state.wishlists.includes(filterList)) filterList = '';
+    $('filters').innerHTML = state.wishlists.length
+      ? chip('', 'Tutte', !filterList) + state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')
+      : '';
+  } else {
+    const used = state.genres.filter((g) => owned.some((b) => (b.genres || []).includes(g)));
+    if (filterGenre && !used.includes(filterGenre)) filterGenre = '';
+    $('filters').innerHTML = used.length ? chip('', 'Tutti', !filterGenre) + used.map((g) => chip(g, g, filterGenre === g)).join('') : '';
+  }
 
   if (!total) {
-    $('list').innerHTML = `<div class="empty"><strong>La libreria è vuota</strong>
+    $('list').innerHTML = wish
+      ? `<div class="empty"><strong>Nessun desiderio</strong>Scansiona un libro in negozio, oppure aggiungilo a mano: finirà nella lista che scegli.</div>`
+      : `<div class="empty"><strong>La libreria è vuota</strong>
       Tocca «Scansiona un libro» e inquadra il codice a barre sul retro della copertina.</div>`;
   } else if (!books.length) {
     $('list').innerHTML = '<div class="empty"><strong>Nessun libro trovato</strong>Prova a cambiare ricerca o filtro.</div>';
@@ -411,7 +440,9 @@ const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
-  current = { book: { ...book }, isNew, selected: new Set(book.genres || []) };
+  // Un libro nuovo va dove si sta guardando: in libreria, oppure nella lista desideri aperta.
+  const defaultList = viewMode === 'wish' ? (filterList || state.wishlists[0] || '') : '';
+  current = { book: { ...book }, isNew, selected: new Set(book.genres || []), list: isNew ? (book.list ?? defaultList) : (book.list || '') };
   $('book-heading').textContent = isNew ? 'Nuovo libro' : 'Scheda libro';
   for (const k of FIELDS) $('f-' + k).value = book[k] || '';
   $('f-genre-new').value = '';
@@ -421,6 +452,9 @@ function openBook(book, opts = {}) {
   banner.textContent = opts.banner || '';
   $('book-delete').hidden = isNew;
   $('book-save-next').hidden = !isNew;
+  $('book-bought').hidden = isNew || !current.list;
+  $('f-list-new').value = '';
+  renderFormLists();
   renderFormCover();
   renderFormGenres();
   renderStores();
@@ -432,6 +466,21 @@ function openBook(book, opts = {}) {
 function renderFormCover() {
   $('f-cover-view').outerHTML = coverHtml({ title: $('f-title').value, cover: current.book.cover }, true).replace('class="cover big"', 'class="cover big" id="f-cover-view"');
   $('f-cover-remove').hidden = !current.book.cover;
+}
+
+function renderFormLists() {
+  const chip = (value, label) => `<button type="button" class="chip${current.list === value ? ' on' : ''}" data-list="${esc(value)}" aria-pressed="${current.list === value}">${esc(label)}</button>`;
+  $('f-lists').innerHTML = chip('', 'In libreria') + state.wishlists.map((l) => chip(l, l)).join('');
+}
+
+function addWishlist(name) {
+  name = name.trim().replace(/\s+/g, ' ');
+  if (!name) return '';
+  const existing = state.wishlists.find((l) => l.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
+  state.wishlists.push(name);
+  saveState();
+  return name;
 }
 
 function renderFormGenres() {
@@ -459,6 +508,7 @@ function readForm() {
   for (const k of FIELDS) b[k] = $('f-' + k).value.trim();
   b.isbn = toIsbn13(b.isbn) || cleanIsbn(b.isbn);
   b.genres = state.genres.filter((g) => current.selected.has(g));
+  b.list = current.list || '';
   return b;
 }
 
@@ -540,7 +590,9 @@ async function handleIsbn(isbn) {
   const dup = state.books.find((b) => b.isbn === isbn);
   if (dup) {
     const when = dup.addedAt ? ' il ' + new Date(dup.addedAt).toLocaleDateString('it-IT') : '';
-    openBook(dup, { banner: 'Questo libro è già in libreria (aggiunto' + when + ').' });
+    openBook(dup, { banner: dup.list
+      ? 'Questo libro è già nella lista desideri «' + dup.list + '».'
+      : 'Questo libro è già in libreria (aggiunto' + when + ').' });
     return;
   }
   const { data, failed, googleDown } = await lookupIsbn(isbn);
@@ -753,7 +805,7 @@ function pickManualResult(i) {
   if (!data) return;
   const dup = data.isbn && state.books.find((b) => b.isbn === data.isbn);
   hide('manual');
-  if (dup) return openBook(dup, { banner: 'Questo libro è già in libreria.' });
+  if (dup) return openBook(dup, { banner: dup.list ? 'Questo libro è già nella lista desideri «' + dup.list + '».' : 'Questo libro è già in libreria.' });
   const s = suggestGenres(data.subjects, data.authors, data.description);
   openBook({ ...data, subjects: undefined, description: undefined, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
 }
@@ -778,9 +830,9 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['notes', 'Note']];
+  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['notes', 'Note'], ['list', 'Lista']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
-  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(b[c[0]])).join(';')));
+  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
 }
 
@@ -797,6 +849,8 @@ async function restoreBackup(file) {
       added++;
     }
     for (const g of data.genres || []) if (typeof g === 'string' && !state.genres.includes(g)) state.genres.push(g);
+    for (const l of data.wishlists || []) if (typeof l === 'string' && !state.wishlists.includes(l)) state.wishlists.push(l);
+    for (const b of state.books) if (b.list && !state.wishlists.includes(b.list)) state.wishlists.push(b.list);
     saveState();
     renderList();
     renderSettings();
@@ -812,6 +866,13 @@ function renderSettings() {
     + ' su questo telefono. Per ora i dati restano solo qui: scarica un backup ogni tanto.';
   $('app-version').textContent = 'Versione ' + APP_VERSION;
   $('gkey').value = googleKey();
+  $('wish-list').innerHTML = state.wishlists.map((l, i) => {
+    const used = state.books.filter((b) => b.list === l).length;
+    return `<div class="genre-item">
+      <input type="text" id="wish-${i}" value="${esc(l)}" data-wish-index="${i}" aria-label="Nome della lista">
+      <button class="btn ghost" data-wish-del="${i}" ${used ? 'disabled' : ''} aria-label="Elimina ${esc(l)}">${used ? used + (used === 1 ? ' libro' : ' libri') : 'Elimina'}</button>
+    </div>`;
+  }).join('');
   $('genre-list').innerHTML = state.genres.map((g, i) => {
     const used = state.books.filter((b) => (b.genres || []).includes(g)).length;
     return `<div class="genre-item">
@@ -819,6 +880,36 @@ function renderSettings() {
       <button class="btn ghost" data-genre-del="${i}" aria-label="Elimina ${esc(g)}">${used ? 'Elimina (' + used + ')' : 'Elimina'}</button>
     </div>`;
   }).join('');
+}
+
+function renameWishlist(i, name) {
+  const old = state.wishlists[i];
+  name = name.trim().replace(/\s+/g, ' ');
+  if (!name || name === old) return renderSettings();
+  const clash = state.wishlists.findIndex((l, j) => j !== i && l.toLowerCase() === name.toLowerCase());
+  const target = clash >= 0 ? state.wishlists[clash] : name;
+  for (const b of state.books) if (b.list === old) b.list = target;
+  if (clash >= 0) state.wishlists.splice(i, 1); else state.wishlists[i] = name;
+  if (filterList === old) filterList = target;
+  saveState();
+  renderSettings();
+  renderList();
+  toast(clash >= 0 ? '«' + old + '» unita a «' + target + '».' : 'Lista rinominata.');
+}
+
+function deleteWishlist(i) {
+  const l = state.wishlists[i];
+  if (state.books.some((b) => b.list === l)) return toast('Sposta o elimina prima i libri di questa lista.');
+  state.wishlists.splice(i, 1);
+  saveState();
+  renderSettings();
+  renderList();
+  toast('Lista «' + l + '» eliminata.', 'Annulla', () => {
+    state.wishlists.splice(i, 0, l);
+    saveState();
+    renderSettings();
+    renderList();
+  });
 }
 
 function renameGenre(i, name) {
@@ -887,9 +978,11 @@ function init() {
   $('filters').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
-    filterGenre = chip.dataset.genre;
+    if (viewMode === 'wish') filterList = chip.dataset.genre; else filterGenre = chip.dataset.genre;
     renderList();
   });
+  $('tab-library').addEventListener('click', () => { viewMode = 'library'; renderList(); });
+  $('tab-wish').addEventListener('click', () => { viewMode = 'wish'; renderList(); });
   $('list').addEventListener('click', (e) => {
     const row = e.target.closest('.book');
     const book = row && state.books.find((b) => b.id === row.dataset.id);
@@ -920,7 +1013,28 @@ function init() {
     if (e.target.id === 'f-isbn' || e.target.id === 'f-title' || e.target.id === 'f-authors') renderStores();
   });
   $('book-close').addEventListener('click', () => hide('book'));
-  $('book-save').addEventListener('click', () => { if (saveBook()) { hide('book'); toast('Salvato.'); } });
+  $('book-save').addEventListener('click', () => {
+    if (saveBook()) { hide('book'); toast(current.book.list ? 'Salvato in «' + current.book.list + '».' : 'Salvato in libreria.'); }
+  });
+  $('book-bought').addEventListener('click', () => {
+    current.list = '';
+    if (saveBook()) { hide('book'); toast('Spostato in libreria.'); }
+  });
+  $('f-lists').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    current.list = chip.dataset.list;
+    renderFormLists();
+  });
+  const addFormList = () => {
+    const l = addWishlist($('f-list-new').value);
+    if (!l) return;
+    current.list = l;
+    $('f-list-new').value = '';
+    renderFormLists();
+  };
+  $('f-list-add').addEventListener('click', addFormList);
+  $('f-list-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFormList(); } });
   $('book-save-next').addEventListener('click', () => { if (saveBook()) { hide('book'); openScanner(); } });
   $('book-refill').addEventListener('click', refillFromCatalogs);
   $('book-delete').addEventListener('click', () => {
@@ -982,6 +1096,16 @@ function init() {
       toast('Google Books rifiuta questa chiave: controlla di averla copiata tutta e le restrizioni.');
     }
   });
+  $('wish-list').addEventListener('change', (e) => {
+    if (e.target.dataset.wishIndex !== undefined) renameWishlist(Number(e.target.dataset.wishIndex), e.target.value);
+  });
+  $('wish-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-wish-del]');
+    if (btn) deleteWishlist(Number(btn.dataset.wishDel));
+  });
+  const addSettingsList = () => { if (addWishlist($('wish-new').value)) { $('wish-new').value = ''; renderSettings(); renderList(); } };
+  $('wish-add').addEventListener('click', addSettingsList);
+  $('wish-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') addSettingsList(); });
   $('genre-list').addEventListener('change', (e) => {
     if (e.target.dataset.genreIndex !== undefined) renameGenre(Number(e.target.dataset.genreIndex), e.target.value);
   });

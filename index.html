@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -27,6 +27,10 @@
     <button class="icon-btn" id="btn-settings" aria-label="Impostazioni e backup">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4.5v5M6 14.5v5" /></svg>
     </button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab on" id="tab-library" role="tab" aria-selected="true">Libreria</button>
+    <button class="tab" id="tab-wish" role="tab" aria-selected="false">Desideri</button>
   </div>
   <div class="tools">
     <input type="search" id="search" placeholder="Cerca titolo, autore, editore" autocomplete="off" aria-label="Cerca nella libreria">
@@ -133,6 +137,15 @@
       </div>
     </div>
 
+    <div class="field" data-key="list">
+      <label>Dove lo metto</label>
+      <div class="chips" id="f-lists"></div>
+      <div class="row">
+        <input id="f-list-new" type="text" placeholder="Nuova lista desideri" aria-label="Nuova lista desideri">
+        <button type="button" class="btn ghost" id="f-list-add">Aggiungi</button>
+      </div>
+    </div>
+
     <div class="field" data-key="genres">
       <label>Genere <small id="f-genre-note"></small></label>
       <div class="chips" id="f-genres"></div>
@@ -152,6 +165,7 @@
     </div>
 
     <div class="form-actions">
+      <button type="button" class="btn primary wide" id="book-bought">Comprato: sposta in libreria</button>
       <button type="button" class="btn primary wide" id="book-save-next">Salva e scansiona il prossimo</button>
       <button type="button" class="btn ghost wide" id="book-refill">Completa i campi vuoti dai cataloghi</button>
       <button type="button" class="btn danger wide" id="book-delete">Elimina dalla libreria</button>
@@ -185,6 +199,14 @@
       <button class="btn primary" id="gkey-save">Salva e prova</button>
     </div>
 
+    <h3>Liste desideri</h3>
+    <p class="hint">Tocca un nome per cambiarlo. Una lista si può eliminare solo quando è vuota.</p>
+    <div id="wish-list" class="genre-list"></div>
+    <div class="row">
+      <input id="wish-new" type="text" placeholder="Nuova lista desideri" aria-label="Nuova lista desideri">
+      <button class="btn ghost" id="wish-add">Aggiungi</button>
+    </div>
+
     <h3>Generi</h3>
     <p class="hint">Tocca un nome per cambiarlo. Se lo rinomini, si aggiorna in tutti i libri.</p>
     <div id="genre-list" class="genre-list"></div>
@@ -197,7 +219,7 @@
 
 <div class="toast" id="toast" hidden role="status"></div>
 
-<script src="vendor/zxing.min.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="vendor/zxing.min.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

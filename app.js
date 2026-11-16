@@ -132,7 +132,17 @@ function fromGoogleItem(item) {
 async function lookupGoogle(isbn) {
   const data = await getJson(googleUrl('q=isbn:' + isbn));
   if (!data.items || !data.items.length) return null;
-  return fromGoogleItem(data.items[0]);
+  let item = data.items[0];
+  const v = item.volumeInfo || {};
+  // L'elenco dei risultati spesso omette editore e pagine: la scheda completa del volume li ha più spesso.
+  if ((!v.publisher || !v.pageCount) && item.id) {
+    try {
+      const key = googleKey();
+      const full = await getJson('https://www.googleapis.com/books/v1/volumes/' + encodeURIComponent(item.id) + '?country=IT' + (key ? '&key=' + encodeURIComponent(key) : ''));
+      if (full && full.volumeInfo) item = { ...item, volumeInfo: { ...v, ...full.volumeInfo } };
+    } catch (e) { /* restano i dati dell'elenco */ }
+  }
+  return fromGoogleItem(item);
 }
 
 async function lookupOpenLibrary(isbn) {
@@ -151,6 +161,20 @@ async function lookupOpenLibrary(isbn) {
   };
 }
 
+/* Editori italiani riconoscibili dalle prime cifre dell'ISBN (dopo 978-88).
+   Si usa solo se i cataloghi non indicano l'editore. */
+const IT_PUBLISHERS = [
+  ['04', 'Mondadori'], ['06', 'Einaudi'], ['07', 'Feltrinelli'], ['08', 'Zanichelli'], ['09', 'Giunti'],
+  ['11', 'Garzanti'], ['15', 'Il Mulino'], ['17', 'Rizzoli'], ['200', 'Sperling & Kupfer'], ['304', 'Longanesi'],
+  ['389', 'Sellerio'], ['420', 'Laterza'], ['452', 'Bompiani'], ['459', 'Adelphi'], ['541', 'Newton Compton'], ['566', 'Piemme'],
+];
+function publisherFromIsbn(isbn) {
+  if (!/^97888/.test(isbn)) return '';
+  const rest = isbn.slice(5);
+  const hit = IT_PUBLISHERS.find(([prefix]) => rest.startsWith(prefix));
+  return hit ? hit[1] : '';
+}
+
 /* Interroga i due cataloghi insieme e unisce i risultati:
    per ogni campo vale il primo catalogo che lo ha. */
 async function lookupIsbn(isbn) {
@@ -164,6 +188,7 @@ async function lookupIsbn(isbn) {
     for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover']) if (!merged[k] && f[k]) merged[k] = f[k];
     merged.subjects.push(...(f.subjects || []));
   }
+  if (!merged.publisher) merged.publisher = publisherFromIsbn(isbn);
   return { data: merged, failed: false };
 }
 

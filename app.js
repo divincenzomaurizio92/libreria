@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -130,6 +130,7 @@ function fromGoogleItem(item) {
     pages: v.pageCount ? String(v.pageCount) : '',
     cover: httpsUrl(img.thumbnail || img.smallThumbnail),
     subjects: v.categories || [],
+    description: String(v.description || '').replace(/<[^>]+>/g, ' '),
   };
 }
 
@@ -138,12 +139,16 @@ async function lookupGoogle(isbn) {
   if (!data.items || !data.items.length) return null;
   let item = data.items[0];
   const v = item.volumeInfo || {};
-  // L'elenco dei risultati spesso omette editore e pagine: la scheda completa del volume li ha più spesso.
-  if ((!v.publisher || !v.pageCount) && item.id) {
+  // La scheda completa del volume ha più spesso editore e pagine, e categorie molto più precise
+  // (es. "Biography & Autobiography / Personal Memoirs" invece di "Fiction"): si chiede sempre.
+  if (item.id) {
     try {
       const key = googleKey();
       const full = await getJson('https://www.googleapis.com/books/v1/volumes/' + encodeURIComponent(item.id) + '?country=IT' + (key ? '&key=' + encodeURIComponent(key) : ''));
-      if (full && full.volumeInfo) item = { ...item, volumeInfo: { ...v, ...full.volumeInfo } };
+      if (full && full.volumeInfo) {
+        const f = full.volumeInfo;
+        item = { ...item, volumeInfo: { ...v, ...f, categories: [...(v.categories || []), ...(f.categories || [])] } };
+      }
     } catch (e) { /* restano i dati dell'elenco */ }
   }
   return fromGoogleItem(item);
@@ -191,6 +196,15 @@ function fixPublisher(isbn, fromCatalog) {
   return entry[1];
 }
 
+/* Uniforma il nome dell'editore: "Giunti Editore" -> "Giunti", "Editori Laterza" -> "Laterza". */
+function cleanPublisher(name) {
+  const cleaned = String(name || '')
+    .replace(/\b(casa editrice|editore|editori|edizioni|editrice)\b/gi, ' ')
+    .replace(/\b(s\.?p\.?a\.?|s\.?r\.?l\.?)(?=\s|$)/gi, ' ')
+    .replace(/\s+/g, ' ').replace(/^[\s,.-]+|[\s,.-]+$/g, '');
+  return cleaned || String(name || '').trim();
+}
+
 /* Interroga i due cataloghi insieme e unisce i risultati:
    per ogni campo vale il primo catalogo che lo ha. */
 async function lookupIsbn(isbn) {
@@ -199,18 +213,19 @@ async function lookupIsbn(isbn) {
   const failed = results.every((r) => r.status === 'rejected');
   const googleDown = results[0].status === 'rejected';
   if (!found.length) return { data: null, failed, googleDown };
-  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [] };
+  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '' };
   for (const f of found) {
     for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover']) if (!merged[k] && f[k]) merged[k] = f[k];
     merged.subjects.push(...(f.subjects || []));
+    if (!merged.description && f.description) merged.description = f.description;
   }
-  merged.publisher = fixPublisher(isbn, merged.publisher);
+  merged.publisher = cleanPublisher(fixPublisher(isbn, merged.publisher));
   return { data: merged, failed: false };
 }
 
 async function searchByText(text) {
   const data = await getJson(googleUrl('maxResults=12&q=' + encodeURIComponent(text)));
-  return (data.items || []).map(fromGoogleItem).filter((b) => b.title);
+  return (data.items || []).map(fromGoogleItem).filter((b) => b.title).map((b) => ({ ...b, publisher: cleanPublisher(b.publisher) }));
 }
 
 /* Copertina di riserva da Open Library: si prova solo se manca. */
@@ -267,7 +282,21 @@ const GENRE_RULES = [
   [/fiction|narrativa|romanzo|literary/, 'Narrativa'],
 ];
 
-function suggestGenres(subjects, authors) {
+/* Parole della trama che indicano un genere in modo esplicito.
+   Si usano solo se le categorie del catalogo non dicono nulla di più preciso di "Narrativa". */
+const PLOT_RULES = [
+  [/\bthriller\b/, 'Thriller'],
+  [/\bgiallo\b|\bnoir\b|\bpoliziesco\b/, 'Giallo'],
+  [/\bmemoir\b|autobiograf|\bbiografia\b/, 'Biografie'],
+  [/romanzo storico/, 'Romanzo storico'],
+  [/\bfantasy\b/, 'Fantasy'],
+  [/fantascienza|distopi/, 'Fantascienza'],
+  [/\bhorror\b/, 'Horror'],
+  [/graphic novel|\bfumetto\b/, 'Fumetti'],
+  [/\bsaggio\b/, 'Saggistica'],
+];
+
+function suggestGenres(subjects, authors, description) {
   // 1. Le scelte già fatte per lo stesso autore valgono più dei cataloghi.
   const first = firstAuthor(authors).toLowerCase();
   if (first) {
@@ -284,6 +313,11 @@ function suggestGenres(subjects, authors) {
     if (re.test(text) && state.genres.includes(genre) && !hits.includes(genre)) hits.push(genre);
   }
   if (hits.length > 1) hits = hits.filter((g) => g !== 'Narrativa');
+  if (!hits.length || (hits.length === 1 && hits[0] === 'Narrativa')) {
+    const plot = String(description || '').toLowerCase();
+    const fromPlot = PLOT_RULES.filter(([re, genre]) => re.test(plot) && state.genres.includes(genre)).map((r) => r[1]);
+    if (fromPlot.length) hits = fromPlot;
+  }
   return { genres: hits.slice(0, 2), source: hits.length ? 'catalog' : '' };
 }
 
@@ -486,7 +520,7 @@ async function refillFromCatalogs() {
     if (cover) { current.book.cover = cover; renderFormCover(); filled++; }
   }
   if (current.selected.size === 0) {
-    const s = suggestGenres(data.subjects, $('f-authors').value);
+    const s = suggestGenres(data.subjects, $('f-authors').value, data.description);
     if (s.genres.length) { s.genres.forEach((g) => current.selected.add(g)); renderFormGenres(); filled++; }
   }
   markMissing();
@@ -515,10 +549,10 @@ async function handleIsbn(isbn) {
     return;
   }
   if (!data.cover) data.cover = await probeCover(isbn);
-  const s = suggestGenres(data.subjects, data.authors);
+  const s = suggestGenres(data.subjects, data.authors, data.description);
   const note = s.source === 'author' ? 'suggerito dai tuoi libri di ' + firstAuthor(data.authors)
     : s.source === 'catalog' ? 'suggerito dal catalogo, correggilo se serve' : 'scegline uno o più';
-  openBook({ ...data, subjects: undefined, genres: s.genres }, { genreNote: '(' + note + ')' });
+  openBook({ ...data, subjects: undefined, description: undefined, genres: s.genres }, { genreNote: '(' + note + ')' });
 }
 
 /* ================= 7. SCANNER ================= */
@@ -712,8 +746,8 @@ function pickManualResult(i) {
   const dup = data.isbn && state.books.find((b) => b.isbn === data.isbn);
   hide('manual');
   if (dup) return openBook(dup, { banner: 'Questo libro è già in libreria.' });
-  const s = suggestGenres(data.subjects, data.authors);
-  openBook({ ...data, subjects: undefined, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
+  const s = suggestGenres(data.subjects, data.authors, data.description);
+  openBook({ ...data, subjects: undefined, description: undefined, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
 }
 
 /* ================= 9. IMPOSTAZIONI, BACKUP, ESPORTAZIONE ================= */

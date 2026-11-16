@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -168,15 +168,27 @@ async function lookupOpenLibrary(isbn) {
 /* Editori italiani riconoscibili dalle prime cifre dell'ISBN (dopo 978-88).
    Si usa solo se i cataloghi non indicano l'editore. */
 const IT_PUBLISHERS = [
-  ['04', 'Mondadori'], ['06', 'Einaudi'], ['07', 'Feltrinelli'], ['08', 'Zanichelli'], ['09', 'Giunti'],
-  ['11', 'Garzanti'], ['15', 'Il Mulino'], ['17', 'Rizzoli'], ['200', 'Sperling & Kupfer'], ['304', 'Longanesi'],
-  ['389', 'Sellerio'], ['420', 'Laterza'], ['452', 'Bompiani'], ['459', 'Adelphi'], ['541', 'Newton Compton'], ['566', 'Piemme'],
+  // [prime cifre, editore, nomi e collane che i cataloghi usano per lo stesso editore]
+  ['04', 'Mondadori', /mondadori|oscar/i], ['06', 'Einaudi', /einaudi/i], ['07', 'Feltrinelli', /feltrinelli/i],
+  ['08', 'Zanichelli', /zanichelli/i], ['09', 'Giunti', /giunti/i], ['11', 'Garzanti', /garzanti/i],
+  ['15', 'Il Mulino', /mulino/i], ['17', 'Rizzoli', /rizzoli|bur\b|biblioteca universale/i],
+  ['200', 'Sperling & Kupfer', /sperling/i], ['304', 'Longanesi', /longanesi/i], ['389', 'Sellerio', /sellerio/i],
+  ['420', 'Laterza', /laterza/i], ['452', 'Bompiani', /bompiani/i], ['459', 'Adelphi', /adelphi/i],
+  ['541', 'Newton Compton', /newton/i], ['566', 'Piemme', /piemme/i],
 ];
-function publisherFromIsbn(isbn) {
-  if (!/^97888/.test(isbn)) return '';
+function publisherEntry(isbn) {
+  if (!/^97888/.test(isbn)) return null;
   const rest = isbn.slice(5);
-  const hit = IT_PUBLISHERS.find(([prefix]) => rest.startsWith(prefix));
-  return hit ? hit[1] : '';
+  return IT_PUBLISHERS.find(([prefix]) => rest.startsWith(prefix)) || null;
+}
+/* L'editore indicato dall'ISBN è affidabile: le prime cifre sono assegnate all'editore.
+   Se il catalogo ne indica uno diverso (capita: schede di audiolibri o dati sbagliati),
+   vince quello dell'ISBN. Se il catalogo indica una collana dello stesso editore, resta quella. */
+function fixPublisher(isbn, fromCatalog) {
+  const entry = publisherEntry(isbn);
+  if (!entry) return fromCatalog || '';
+  if (fromCatalog && entry[2].test(fromCatalog)) return fromCatalog;
+  return entry[1];
 }
 
 /* Interroga i due cataloghi insieme e unisce i risultati:
@@ -192,7 +204,7 @@ async function lookupIsbn(isbn) {
     for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover']) if (!merged[k] && f[k]) merged[k] = f[k];
     merged.subjects.push(...(f.subjects || []));
   }
-  if (!merged.publisher) merged.publisher = publisherFromIsbn(isbn);
+  merged.publisher = fixPublisher(isbn, merged.publisher);
   return { data: merged, failed: false };
 }
 

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Libreria di casa</title>
+<meta name="theme-color" content="#7B2D52">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Libreria">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ SCHERMATA PRINCIPALE: la libreria ============ -->
+<header class="top">
+  <div class="top-row">
+    <div>
+      <h1>Libreria</h1>
+      <p class="count" id="count">Nessun libro</p>
+    </div>
+    <button class="icon-btn" id="btn-settings" aria-label="Impostazioni e backup">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4.5v5M6 14.5v5" /></svg>
+    </button>
+  </div>
+  <div class="tools">
+    <input type="search" id="search" placeholder="Cerca titolo, autore, editore" autocomplete="off" aria-label="Cerca nella libreria">
+    <select id="sort" aria-label="Ordina i libri">
+      <option value="recent">Ultimi aggiunti</option>
+      <option value="title">Titolo A-Z</option>
+      <option value="author">Autore A-Z</option>
+    </select>
+  </div>
+  <div class="filters" id="filters" aria-label="Filtra per genere"></div>
+</header>
+
+<main id="list" class="list"></main>
+
+<nav class="bottom">
+  <button class="btn ghost" id="btn-manual">A mano</button>
+  <button class="btn primary big" id="btn-scan">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3M8 8v8M11 8v8M14 8v8M16.5 8v8" /></svg>
+    Scansiona un libro
+  </button>
+</nav>
+
+<!-- ============ SCANNER ============ -->
+<section class="sheet scanner" id="scanner" hidden aria-label="Scansione del codice a barre">
+  <video id="video" playsinline muted autoplay></video>
+  <div class="scan-frame" aria-hidden="true"><span></span></div>
+  <div class="scan-top">
+    <button class="btn dark" id="scan-close">Chiudi</button>
+    <button class="btn dark" id="scan-torch" hidden>Luce</button>
+  </div>
+  <div class="scan-bottom">
+    <p id="scan-status">Inquadra il codice a barre sul retro del libro</p>
+    <div class="scan-actions">
+      <button class="btn dark" id="scan-type">Scrivi l'ISBN</button>
+      <label class="btn dark">Fotografa il codice
+        <input type="file" id="scan-photo" accept="image/*" capture="environment" hidden>
+      </label>
+    </div>
+  </div>
+</section>
+
+<!-- ============ AGGIUNTA A MANO: ISBN o titolo ============ -->
+<section class="sheet" id="manual" hidden aria-label="Aggiungi un libro a mano">
+  <div class="sheet-head">
+    <button class="btn ghost" id="manual-close">Chiudi</button>
+    <h2>Aggiungi a mano</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <form id="manual-form" class="search-form">
+      <label for="manual-q">ISBN, oppure titolo e autore</label>
+      <div class="row">
+        <input id="manual-q" type="text" placeholder="Es. 9788806219352 oppure Il nome della rosa" autocomplete="off">
+        <button class="btn primary" type="submit">Cerca</button>
+      </div>
+    </form>
+    <p class="hint" id="manual-status">Utile per i libri senza codice a barre.</p>
+    <div id="manual-results" class="results"></div>
+    <button class="btn ghost wide" id="manual-empty">Compila una scheda vuota</button>
+  </div>
+</section>
+
+<!-- ============ SCHEDA LIBRO (sempre modificabile) ============ -->
+<section class="sheet" id="book" hidden aria-label="Scheda del libro">
+  <div class="sheet-head">
+    <button class="btn ghost" id="book-close">Chiudi</button>
+    <h2 id="book-heading">Scheda libro</h2>
+    <button class="btn primary" id="book-save">Salva</button>
+  </div>
+  <form class="sheet-body" id="book-form" autocomplete="off">
+    <p class="banner" id="book-banner" hidden></p>
+
+    <div class="cover-row">
+      <div class="cover big" id="f-cover-view"></div>
+      <div class="cover-actions">
+        <label class="btn ghost">Fotografa la copertina
+          <input type="file" id="f-cover-file" accept="image/*" capture="environment" hidden>
+        </label>
+        <button type="button" class="btn ghost" id="f-cover-remove">Togli copertina</button>
+        <div class="stores" id="f-stores"></div>
+      </div>
+    </div>
+
+    <div class="field" data-key="title">
+      <label for="f-title">Titolo</label>
+      <input id="f-title" type="text">
+    </div>
+    <div class="field" data-key="authors">
+      <label for="f-authors">Autore <small>(più autori separati da virgola)</small></label>
+      <input id="f-authors" type="text">
+    </div>
+    <div class="field" data-key="publisher">
+      <label for="f-publisher">Casa editrice</label>
+      <input id="f-publisher" type="text">
+    </div>
+    <div class="grid2">
+      <div class="field" data-key="pages">
+        <label for="f-pages">Pagine</label>
+        <input id="f-pages" type="number" inputmode="numeric" min="1">
+      </div>
+      <div class="field" data-key="year">
+        <label for="f-year">Anno</label>
+        <input id="f-year" type="number" inputmode="numeric" min="1400" max="2100">
+      </div>
+    </div>
+
+    <div class="field" data-key="genres">
+      <label>Genere <small id="f-genre-note"></small></label>
+      <div class="chips" id="f-genres"></div>
+      <div class="row">
+        <input id="f-genre-new" type="text" placeholder="Nuovo genere" aria-label="Nuovo genere">
+        <button type="button" class="btn ghost" id="f-genre-add">Aggiungi</button>
+      </div>
+    </div>
+
+    <div class="field" data-key="isbn">
+      <label for="f-isbn">ISBN</label>
+      <input id="f-isbn" type="text" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label for="f-notes">Note</label>
+      <textarea id="f-notes" rows="3"></textarea>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="btn primary wide" id="book-save-next">Salva e scansiona il prossimo</button>
+      <button type="button" class="btn ghost wide" id="book-refill">Completa i campi vuoti dai cataloghi</button>
+      <button type="button" class="btn danger wide" id="book-delete">Elimina dalla libreria</button>
+    </div>
+  </form>
+</section>
+
+<!-- ============ IMPOSTAZIONI ============ -->
+<section class="sheet" id="settings" hidden aria-label="Impostazioni">
+  <div class="sheet-head">
+    <button class="btn ghost" id="settings-close">Chiudi</button>
+    <h2>Impostazioni</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <h3>Backup</h3>
+    <p class="hint" id="settings-info"></p>
+    <div class="stack">
+      <button class="btn primary wide" id="backup-download">Scarica il backup</button>
+      <label class="btn ghost wide">Ripristina da un backup
+        <input type="file" id="backup-file" accept="application/json,.json" hidden>
+      </label>
+      <button class="btn ghost wide" id="export-csv">Esporta per Excel</button>
+    </div>
+
+    <h3>Generi</h3>
+    <p class="hint">Tocca un nome per cambiarlo. Se lo rinomini, si aggiorna in tutti i libri.</p>
+    <div id="genre-list" class="genre-list"></div>
+    <div class="row">
+      <input id="genre-new" type="text" placeholder="Nuovo genere" aria-label="Nuovo genere">
+      <button class="btn ghost" id="genre-add">Aggiungi</button>
+    </div>
+  </div>
+</section>
+
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="vendor/zxing.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

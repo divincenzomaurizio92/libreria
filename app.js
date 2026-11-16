@@ -51,6 +51,14 @@ function saveState() {
   }
 }
 
+/* Chiave di Google Books: sta solo su questo telefono, mai nel codice pubblico né nel backup. */
+const GKEY = 'libreria.googleKey';
+function googleKey() { try { return localStorage.getItem(GKEY) || ''; } catch (e) { return ''; } }
+function googleUrl(query) {
+  const key = googleKey();
+  return 'https://www.googleapis.com/books/v1/volumes?country=IT&' + query + (key ? '&key=' + encodeURIComponent(key) : '');
+}
+
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 /* ================= 2. ISBN ================= */
@@ -122,7 +130,7 @@ function fromGoogleItem(item) {
 }
 
 async function lookupGoogle(isbn) {
-  const data = await getJson('https://www.googleapis.com/books/v1/volumes?country=IT&q=isbn:' + isbn);
+  const data = await getJson(googleUrl('q=isbn:' + isbn));
   if (!data.items || !data.items.length) return null;
   return fromGoogleItem(data.items[0]);
 }
@@ -149,7 +157,8 @@ async function lookupIsbn(isbn) {
   const results = await Promise.allSettled([lookupGoogle(isbn), lookupOpenLibrary(isbn)]);
   const found = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
   const failed = results.every((r) => r.status === 'rejected');
-  if (!found.length) return { data: null, failed };
+  const googleDown = results[0].status === 'rejected';
+  if (!found.length) return { data: null, failed, googleDown };
   const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [] };
   for (const f of found) {
     for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover']) if (!merged[k] && f[k]) merged[k] = f[k];
@@ -159,7 +168,7 @@ async function lookupIsbn(isbn) {
 }
 
 async function searchByText(text) {
-  const data = await getJson('https://www.googleapis.com/books/v1/volumes?country=IT&maxResults=12&q=' + encodeURIComponent(text));
+  const data = await getJson(googleUrl('maxResults=12&q=' + encodeURIComponent(text)));
   return (data.items || []).map(fromGoogleItem).filter((b) => b.title);
 }
 
@@ -451,10 +460,14 @@ async function handleIsbn(isbn) {
     openBook(dup, { banner: 'Questo libro è già in libreria (aggiunto' + when + ').' });
     return;
   }
-  const { data, failed } = await lookupIsbn(isbn);
+  const { data, failed, googleDown } = await lookupIsbn(isbn);
   if (!data) {
     openBook({ isbn, genres: [] }, {
-      banner: failed
+      banner: googleDown && !googleKey()
+        ? 'Google Books, il catalogo principale, non è ancora attivo: inserisci la chiave nelle Impostazioni. Intanto puoi compilare la scheda a mano.'
+        : googleDown
+        ? 'Google Books non ha risposto (chiave non valida o limite giornaliero raggiunto). Puoi compilare la scheda a mano e completarla più tardi.'
+        : failed
         ? 'Cataloghi non raggiungibili. Puoi compilare la scheda a mano e completarla più tardi.'
         : 'Libro non trovato nei cataloghi. Compila la scheda a mano: l\'ISBN è già inserito.',
     });
@@ -714,6 +727,7 @@ function renderSettings() {
   const n = state.books.length;
   $('settings-info').textContent = (n === 1 ? '1 libro salvato' : n + ' libri salvati')
     + ' su questo telefono. Per ora i dati restano solo qui: scarica un backup ogni tanto.';
+  $('gkey').value = googleKey();
   $('genre-list').innerHTML = state.genres.map((g, i) => {
     const used = state.books.filter((b) => (b.genres || []).includes(g)).length;
     return `<div class="genre-item">
@@ -872,6 +886,18 @@ function init() {
   $('backup-download').addEventListener('click', downloadBackup);
   $('export-csv').addEventListener('click', exportCsv);
   $('backup-file').addEventListener('change', (e) => { if (e.target.files[0]) restoreBackup(e.target.files[0]); e.target.value = ''; });
+  $('gkey-save').addEventListener('click', async () => {
+    const key = $('gkey').value.trim();
+    try { if (key) localStorage.setItem(GKEY, key); else localStorage.removeItem(GKEY); } catch (e) { return toast('Non riesco a salvare la chiave su questo telefono.'); }
+    if (!key) return toast('Chiave rimossa.');
+    toast('Provo la chiave…');
+    try {
+      const found = await lookupGoogle('9788806219352');
+      toast(found ? 'Chiave funzionante: Google Books risponde.' : 'La chiave è accettata, ma il libro di prova non è stato trovato.');
+    } catch (e) {
+      toast('Google Books rifiuta questa chiave: controlla di averla copiata tutta e le restrizioni.');
+    }
+  });
   $('genre-list').addEventListener('change', (e) => {
     if (e.target.dataset.genreIndex !== undefined) renameGenre(Number(e.target.dataset.genreIndex), e.target.value);
   });

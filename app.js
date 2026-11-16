@@ -307,10 +307,18 @@ function suggestGenres(subjects, authors, description) {
     }
   }
   // 2. Altrimenti si traducono le categorie dei cataloghi.
-  const text = (subjects || []).join(' | ').toLowerCase();
+  // Ogni categoria si valuta da sola. In una categoria di narrativa ("Fiction / Thrillers / Psychological")
+  // contano solo i generi narrativi: "Psychological" lì non significa Psicologia.
+  const FICTION = ['Thriller', 'Giallo', 'Romanzo storico', 'Fantascienza', 'Fantasy', 'Horror', 'Romance', 'Bambini e ragazzi', 'Fumetti', 'Classici', 'Narrativa'];
   let hits = [];
-  for (const [re, genre] of GENRE_RULES) {
-    if (re.test(text) && state.genres.includes(genre) && !hits.includes(genre)) hits.push(genre);
+  for (const subject of subjects || []) {
+    const text = String(subject).toLowerCase();
+    const isFiction = /^(juvenile |young adult )?fiction\b/.test(text);
+    for (const [re, genre] of GENRE_RULES) {
+      if (!re.test(text) || !state.genres.includes(genre) || hits.includes(genre)) continue;
+      if (isFiction && !FICTION.includes(genre)) continue;
+      hits.push(genre);
+    }
   }
   if (hits.length > 1) hits = hits.filter((g) => g !== 'Narrativa');
   if (!hits.length || (hits.length === 1 && hits[0] === 'Narrativa')) {

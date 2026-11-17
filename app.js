@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 47; // va tenuto uguale al numero in version.json
+const APP_VERSION = 48; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -744,7 +744,7 @@ function homeGroupsHtml(books, asGrid) {
   // «Tutti i libri» si tocca per tornare a vederli tutti insieme; le tre scelte a destra li dividono.
   const head = `<div class="all-head"><h3 class="rail-label all-label"><button class="all-btn${mode ? '' : ' on'}" data-hsort="" aria-pressed="${!mode}">${filterGenre ? 'Tutti' : 'Tutti i libri'}<small>${books.length}</small></button></h3><div class="hsort" role="group" aria-label="Dividi per">${sw}</div></div>`;
   const body = (items) => (asGrid ? shelfRowsHtml(items) : items.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join(''));
-  if (only) return head + body(books);
+  if (only) return head + (asGrid ? body(books) : `<section class="home-group">${body(books)}</section>`);
   return head + groups.map(([label, items]) => `<section class="home-group"><p class="group-label">${esc(label)}<small>${items.length}</small></p>${body(items)}</section>`).join('');
 }
 const ALL_LABEL = '';

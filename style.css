@@ -687,3 +687,16 @@ body::before {
 .all-btn { display: inline-flex; align-items: baseline; gap: 8px; padding: 6px 0; border: 0; background: none; color: var(--muted); font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
 .all-btn small { font: 500 12px/1 var(--font-body); letter-spacing: 0; color: var(--muted); }
 .all-btn.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* v48: nella lista ogni sezione è un riquadro a sé */
+.list:not(.home) .list-sec, .list:not(.home) .home-group {
+  margin: 0 -6px 22px; padding: 4px 14px 2px; border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  box-shadow: 0 8px 20px -12px rgba(0, 0, 0, .6);
+}
+.list:not(.home) .list-sec > .rail-label { margin: 12px 0 2px; }
+.list:not(.home) .list-sec .book:last-child, .list:not(.home) .home-group .book:last-child { border-bottom: 0; }
+.list:not(.home) .list-sec .rail-empty { margin: 8px 0 14px; }
+.list:not(.home) .home-group > .group-label { margin: 12px 0 2px; }
+.list:not(.home) .all-head { margin: 10px 0 12px; }

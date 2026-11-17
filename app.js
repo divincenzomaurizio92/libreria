@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1476,6 +1476,21 @@ function init() {
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#view-menu')) closeViewMenu(); });
   window.addEventListener('scroll', closeViewMenu, { passive: true });
+  // Home: si torna sempre al punto zero, cioè tutte le copertine della libreria, senza filtri.
+  $('btn-home').addEventListener('click', () => {
+    for (const id of ['view', 'book', 'settings', 'manual', 'filter-sheet']) hide(id);
+    closePeek();
+    viewMode = 'library';
+    viewKind = 'grid';
+    setPref('libreria.view', 'grid');
+    filterGenre = '';
+    filterList = '';
+    $('search').value = '';
+    $('tools').hidden = true;
+    renderList();
+    window.scrollTo(0, 0);
+    document.querySelector('.top').classList.remove('away');
+  });
   $('btn-search').addEventListener('click', () => {
     const tools = $('tools');
     tools.hidden = !tools.hidden;

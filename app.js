@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 23;
+const APP_VERSION = 24;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -702,6 +702,7 @@ function renderList() {
       : viewKind === 'shelf' ? shelvesHtml(books, wish)
       : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
   }
+  visibleIds = books.map((b) => b.id);
   const showing = total && books.length;
   $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : '');
   // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
@@ -770,6 +771,7 @@ function closePeek() { $('peek').hidden = true; peekId = ''; }
 /* ================= SCHEDA DA LEGGERE ================= */
 
 let viewId = '';
+let visibleIds = []; // i libri mostrati nell'elenco, nel loro ordine: serve per passare al successivo
 const itDate = (d) => { const t = new Date(d); return isNaN(t) ? d : t.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' }); };
 
 const LANGS = { it: 'Italiano', en: 'Inglese', fr: 'Francese', es: 'Spagnolo', de: 'Tedesco', pt: 'Portoghese', ja: 'Giapponese' };
@@ -1603,7 +1605,20 @@ function init() {
     lastY = y;
   }, { passive: true });
 
-  // Scheda da leggere
+  // Scheda da leggere: scorrendo con il dito a sinistra o a destra si passa al libro dopo o prima.
+  let swipe = null;
+  $('view').addEventListener('touchstart', (e) => { swipe = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
+  $('view').addEventListener('touchend', (e) => {
+    if (!swipe) return;
+    const dx = e.changedTouches[0].clientX - swipe.x;
+    const dy = e.changedTouches[0].clientY - swipe.y;
+    swipe = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 2) return;
+    const i = visibleIds.indexOf(viewId);
+    const next = state.books.find((b) => b.id === visibleIds[i + (dx < 0 ? 1 : -1)]);
+    if (i < 0 || !next) return toast(dx < 0 ? 'È l\'ultimo libro dell\'elenco.' : 'È il primo libro dell\'elenco.');
+    openView(next);
+  }, { passive: true });
   $('view-close').addEventListener('click', () => hide('view'));
   $('view-edit').addEventListener('click', () => { const b = state.books.find((x) => x.id === viewId); if (b) openBook(b); });
   $('view-body').addEventListener('click', (e) => {

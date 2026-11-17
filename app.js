@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 30;
+const APP_VERSION = 31;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -544,7 +544,15 @@ function shelvesHtml(books, wish) {
   };
   const groups = new Map();
   for (const b of books) for (const k of keysOf(b)) groups.set(k, [...(groups.get(k) || []), b]);
-  const labels = [...groups.keys()].sort((a, b) => (a === empty) - (b === empty) || a.localeCompare(b, 'it'));
+  // Prima le mensole con più libri. I ripiani dello stesso mobile restano vicini, in ordine;
+  // la mensola dei libri senza genere, posto o proprietario va sempre in fondo.
+  const base = (label) => label.split(' · ripiano ')[0];
+  const total = {};
+  for (const [label, items] of groups) total[base(label)] = (total[base(label)] || 0) + items.length;
+  const labels = [...groups.keys()].sort((a, b) => (a === empty) - (b === empty)
+    || total[base(b)] - total[base(a)]
+    || base(a).localeCompare(base(b), 'it')
+    || a.localeCompare(b, 'it', { numeric: true }));
   return labels.map((label) => `<section>
     <h3 class="shelf-label">${esc(label)} · ${groups.get(label).length}</h3>
     <div class="shelf-unit">

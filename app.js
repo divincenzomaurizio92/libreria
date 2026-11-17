@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -279,7 +279,7 @@ function storeLinks(book) {
   return [
     ['Amazon', 'https://www.amazon.it/s?i=stripbooks&k=' + q],
     ['Feltrinelli', 'https://www.lafeltrinelli.it/search/?ts=as&query=' + q],
-    ['Mondadori', 'https://www.mondadoristore.it/search/?g=' + q],
+    ['Mondadori', 'https://www.mondadoristore.it/search?query=' + q],
   ];
 }
 

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 42;
+const APP_VERSION = 43;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -713,17 +713,28 @@ function shelfRowsHtml(books) {
 }
 
 /* In cima alla libreria, senza filtri: file da scorrere di lato con i libri del momento. */
-function railsHtml(owned) {
+/* Le sezioni in cima alla libreria, uguali nelle copertine e nella lista:
+   Sul comodino (i libri in corso, sempre presente) e Da leggere (solo se ce ne sono). */
+function homeSections(owned) {
   const byAdded = (a, b) => (b.addedAt || 0) - (a.addedAt || 0);
-  // Sul comodino i libri in corso; i da leggere hanno la loro mensola. Se sono tanti, si scorre di lato.
   return [
-    ['Sul comodino', owned.filter((b) => b.status === 'reading').sort(byAdded)],
-    ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded)],
-  ].filter(([, items]) => items.length).map(([title, items]) => `<section class="rail-sec">
-    <h3 class="rail-label">${title}<small>${items.length}</small></h3>
-    <div class="rail" style="--rail-w:${[0, 98, 74, 58][gridZoom]}px">${items.map(gridCellHtml).join('')}</div>
+    ['Sul comodino', owned.filter((b) => b.status === 'reading').sort(byAdded), 'Nessun libro in corso. Apri un libro e tocca «In corso»: lo troverai qui.'],
+    ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded), ''],
+  ].filter(([, items, empty]) => items.length || empty);
+}
+const ALL_LABEL = '<h3 class="rail-label all-label">Tutti i libri</h3>';
+function railsHtml(owned) {
+  return homeSections(owned).map(([title, items, empty]) => `<section class="rail-sec">
+    <h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>
+    ${items.length ? `<div class="rail" style="--rail-w:${[0, 98, 74, 58][gridZoom]}px">${items.map(gridCellHtml).join('')}</div>` : `<p class="rail-empty">${empty}</p>`}
     <div class="plank"></div>
-  </section>`).join('');
+  </section>`).join('') + ALL_LABEL;
+}
+function listSectionsHtml(owned) {
+  return homeSections(owned).map(([title, items, empty]) => `<section class="list-sec">
+    <h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>
+    ${items.length ? items.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('') : `<p class="rail-empty">${empty}</p>`}
+  </section>`).join('') + ALL_LABEL;
 }
 
 /* «Da scoprire», in cima ai Desideri: i più venduti e i libri simili ai vostri.
@@ -891,11 +902,12 @@ function renderList() {
       </section>`).join('');
     } else {
       const home = !wish && !audio && viewKind === 'grid';
-      const rails = home && !filterGenre && !q && sort === 'recent' && owned.length >= 6;
-      $('list').innerHTML = home ? (rails && railsHtml(owned) ? railsHtml(owned) + '<h3 class="rail-label all-label">Tutti i libri</h3>' : '') + shelfRowsHtml(books)
+      // Copertine e lista hanno le stesse sezioni, nello stesso ordine.
+      const sections = !wish && !audio && viewKind !== 'shelf' && !filterGenre && !q && sort === 'recent' && owned.length >= 6;
+      $('list').innerHTML = home ? (sections ? railsHtml(owned) : '') + shelfRowsHtml(books)
         : viewKind === 'grid' ? books.map(gridCellHtml).join('')
         : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
-        : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
+        : (sections ? listSectionsHtml(owned) : '') + books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
     }
   }
   // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».

@@ -654,3 +654,9 @@ body::before {
 .view-toggle button.on { background: var(--accent); color: var(--accent-ink); }
 .view-toggle svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .view-toggle button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* v43 */
+.top .icon-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.rail-empty { margin: 0 0 10px; padding: 18px 14px; font-size: 14px; line-height: 1.4; color: var(--muted); border: 1.5px dashed var(--line); border-radius: 10px; }
+.list-sec { margin-bottom: 18px; }
+.list-sec .rail-label, .list > .all-label { margin-top: 14px; }

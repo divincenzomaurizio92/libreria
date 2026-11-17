@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 18;
+const APP_VERSION = 19;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -77,6 +77,16 @@ function googleUrl(query) {
 
 /* Proprietari di un libro: elenco di nomi. I libri salvati prima della versione 9 avevano un solo nome. */
 const ownersOf = (b) => (Array.isArray(b.owners) ? b.owners : b.owner ? [b.owner] : []);
+
+/* Lettura: nessuna pagina da aggiornare, solo tre stati. Vuoto = non indicato. */
+const STATUS = { toread: 'Da leggere', reading: 'In corso', read: 'Letto' };
+let stickyStatus = ''; // lo stato scelto resta proposto mentre si scansionano più libri di fila
+
+function setStatus(b, status) {
+  b.status = status || '';
+  if (b.status === 'read') { if (!b.readAt) b.readAt = today(); } else b.readAt = '';
+  if (b.status === 'reading' && !b.startedAt) b.startedAt = today();
+}
 
 const euro = (n) => Number(n).toFixed(2).replace('.', ',') + ' €';
 
@@ -475,7 +485,8 @@ function isIncomplete(b) {
 function bookRowHtml(b, attr) {
   const series = b.series ? b.series + (b.seriesNum ? ' n. ' + b.seriesNum : '') : '';
   const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : '', series, b.rating ? '★'.repeat(b.rating) : '', b.list && Number(b.price) > 0 ? euro(b.price) : ''].filter(Boolean).join(' · ');
-  const tags = (b.loanTo ? `<span class="tag loan">Prestato a ${esc(b.loanTo)}</span>` : '')
+  const tags = (b.status === 'reading' ? '<span class="tag reading">In corso</span>' : b.status === 'toread' ? '<span class="tag">Da leggere</span>' : '')
+    + (b.loanTo ? `<span class="tag loan">Prestato a ${esc(b.loanTo)}</span>` : '')
     + (b.list ? `<span class="tag wish">${esc(b.list)}</span>` : '')
     + ownersOf(b).map((o) => `<span class="tag">${esc(o)}</span>`).join('')
     + (b.genres || []).map((g) => `<span class="tag">${esc(g)}</span>`).join('');
@@ -498,7 +509,7 @@ function gridCellHtml(b) {
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-author">${esc(firstAuthor(b.authors))}</span><span class="ph-title">${esc(b.title || 'Senza titolo')}</span>`;
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}" data-id="${esc(b.id)}">
-    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}</span>
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
     ${b.loanTo ? '<span class="tag loan">In prestito</span>' : ''}
@@ -551,6 +562,7 @@ function matchesFilter(b) {
   if (!filterGenre) return true;
   if (filterGenre === 'loan') return Boolean(b.loanTo);
   if (filterGenre.startsWith('owner:')) return ownersOf(b).includes(filterGenre.slice(6));
+  if (filterGenre.startsWith('status:')) return (b.status || '') === filterGenre.slice(7);
   if (filterGenre.startsWith('place:')) return b.shelf === filterGenre.slice(6);
   return (b.genres || []).includes(filterGenre.slice(6));
 }
@@ -610,6 +622,7 @@ function renderList() {
     const rooms = state.places.filter((p) => owned.some((b) => b.shelf === p));
     // Le scelte stanno in un pannello a parte, divise per gruppo e con ricerca: reggono anche decine di generi.
     filterGroups = [
+      ['Lettura', Object.keys(STATUS).map((k) => ['status:' + k, k === 'read' ? 'Letti' : STATUS[k], count((b) => b.status === k)]).filter((x) => x[2])],
       ['Prestiti', loans ? [['loan', 'In prestito', loans]] : []],
       ['Di chi è', people.map((o) => ['owner:' + o, o, count((b) => ownersOf(b).includes(o))])],
       ['Dove sta', rooms.map((p) => ['place:' + p, p, count((b) => b.shelf === p)])],
@@ -670,7 +683,7 @@ function openPeek(id, anchor) {
   const place = b.shelf ? b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '') : '';
   const facts = [
     ['Genere', (b.genres || []).join(', ')], ['Dove sta', place], ['Di chi è', ownersOf(b).join(', ')],
-    ['Lista', b.list || ''], ['Prezzo', b.list && Number(b.price) > 0 ? euro(b.price) : ''], ['In prestito a', b.loanTo || ''],
+    ['Lettura', STATUS[b.status] || ''], ['Lista', b.list || ''], ['Prezzo', b.list && Number(b.price) > 0 ? euro(b.price) : ''], ['In prestito a', b.loanTo || ''],
   ].filter(([, v]) => v);
   $('peek-card').innerHTML = `
     <div class="peek-main">
@@ -717,6 +730,8 @@ function renderView(b) {
   const tags = [...(b.list ? [b.list] : []), ...(b.genres || []), ...ownersOf(b).map((o) => 'Di ' + o),
     ...(b.shelf ? [b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '')] : [])];
   const facts = [
+    ['Letto il', b.status === 'read' && b.readAt ? itDate(b.readAt) : ''],
+    ['In lettura da', b.status === 'reading' && b.startedAt ? new Date(b.startedAt).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : ''],
     ['Casa editrice', b.publisher], ['Anno di questa edizione', b.year], ['Pagine', b.pages],
     ['Serie', b.series ? b.series + (b.seriesNum ? ', n. ' + b.seriesNum : '') : ''],
     ['Comprato il', b.boughtAt ? itDate(b.boughtAt) : ''], [b.list ? 'Prezzo di copertina' : 'Prezzo pagato', Number(b.price) > 0 ? euro(b.price) : ''],
@@ -735,6 +750,7 @@ function renderView(b) {
       </div>
       ${tags.length ? `<div class="hero-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
     </div>
+    ${b.list ? '' : `<div class="seg view-status" role="group" aria-label="Lettura">${Object.keys(STATUS).map((k) => `<button data-status="${k}" class="${b.status === k ? 'on' : ''}" aria-pressed="${b.status === k}">${STATUS[k]}</button>`).join('')}</div>`}
     ${b.loanTo ? `<p class="banner" style="margin-top:16px">In prestito a ${esc(b.loanTo)}${b.loanDate ? ' dal ' + esc(itDate(b.loanDate)) : ''}.</p>` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
@@ -750,7 +766,7 @@ function renderView(b) {
 
 let current = null; // { book, isNew, selected:Set }
 
-const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
+const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'readAt', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
@@ -765,6 +781,8 @@ function openBook(book, opts = {}) {
   $('f-loan-back').hidden = isNew || !book.loanTo;
   // Suggerimenti: posizioni e serie già usate.
   const options = (key) => [...new Set(state.books.map((b) => b[key]).filter(Boolean))].sort().map((v) => `<option value="${esc(v)}">`).join('');
+  current.status = isNew ? (book.status || stickyStatus) : (book.status || '');
+  renderFormStatus();
   current.place = book.shelf || '';
   $('f-place-new').value = '';
   renderFormPlaces();
@@ -806,6 +824,17 @@ function renderFormCover() {
     });
   }
   if (!b.cover) { b.color = ''; b.colorFor = ''; }
+}
+
+function renderFormStatus() {
+  for (const b of document.querySelectorAll('#f-status [data-status]')) {
+    b.classList.toggle('on', b.dataset.status === current.status);
+    b.setAttribute('aria-pressed', b.dataset.status === current.status);
+  }
+  // Lo stato di lettura vale per i libri posseduti, non per i desideri.
+  $('f-status-field').hidden = Boolean(current.list);
+  $('f-readAt-field').hidden = current.status !== 'read';
+  if (current.status === 'read' && !$('f-readAt').value) $('f-readAt').value = today();
 }
 
 function renderFormPlaces() {
@@ -877,6 +906,8 @@ function readForm() {
   b.isbn = toIsbn13(b.isbn) || cleanIsbn(b.isbn);
   b.genres = state.genres.filter((g) => current.selected.has(g));
   b.list = current.list || '';
+  setStatus(b, b.list ? '' : current.status);
+  if (b.status === 'read' && $('f-readAt').value) b.readAt = $('f-readAt').value;
   b.shelf = current.place || '';
   if (!b.shelf) b.shelfRow = '';
   b.owners = state.owners.filter((o) => current.owners.has(o));
@@ -1235,9 +1266,9 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto il'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
-  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : b[c[0]])).join(';')));
+  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : c[0] === 'status' ? (STATUS[b.status] || '') : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
 }
 
@@ -1480,6 +1511,17 @@ function init() {
   $('view-close').addEventListener('click', () => hide('view'));
   $('view-edit').addEventListener('click', () => { const b = state.books.find((x) => x.id === viewId); if (b) openBook(b); });
   $('view-body').addEventListener('click', (e) => {
+    const st = e.target.closest('[data-status]');
+    const sb = st && state.books.find((x) => x.id === viewId);
+    if (sb) {
+      // Un tocco imposta lo stato; un secondo tocco sullo stesso lo toglie.
+      setStatus(sb, sb.status === st.dataset.status ? '' : st.dataset.status);
+      sb.updatedAt = Date.now();
+      saveState();
+      renderList();
+      renderView(sb);
+      return;
+    }
     const btn = e.target.closest('[data-act]');
     const b = btn && state.books.find((x) => x.id === viewId);
     if (!b) return;
@@ -1591,7 +1633,7 @@ function init() {
   }
 
   // Scanner
-  $('btn-scan').addEventListener('click', () => openScanner());
+  $('btn-scan').addEventListener('click', () => { stickyStatus = ''; openScanner(); });
   $('scan-close').addEventListener('click', closeScanner);
   $('scan-mode-add').addEventListener('click', () => setScanMode('add'));
   $('scan-mode-check').addEventListener('click', () => setScanMode('check'));
@@ -1669,6 +1711,7 @@ function init() {
     if (!chip) return;
     current.list = chip.dataset.list;
     renderFormLists();
+    renderFormStatus();
   });
   const addFormList = () => {
     const l = addWishlist($('f-list-new').value);
@@ -1679,7 +1722,13 @@ function init() {
   };
   $('f-list-add').addEventListener('click', addFormList);
   $('f-list-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFormList(); } });
-  $('book-save-next').addEventListener('click', () => { if (saveBook()) { hide('book'); openScanner(); } });
+  $('book-save-next').addEventListener('click', () => { const s = current.status; if (saveBook()) { stickyStatus = s; hide('book'); openScanner(); } });
+  $('f-status').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-status]');
+    if (!btn) return;
+    current.status = current.status === btn.dataset.status ? '' : btn.dataset.status;
+    renderFormStatus();
+  });
   $('book-refill').addEventListener('click', refillFromCatalogs);
   $('book-delete').addEventListener('click', () => {
     const b = current.book;

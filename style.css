@@ -366,3 +366,6 @@ h1 { font-size: 28px; }
 .list [data-id], .peek { -webkit-tap-highlight-color: transparent; }
 .cell-price { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .z3 .cell-price { display: none; }
+
+/* Con la copertina vera niente cornice colorata: il colore serve solo quando la copertina manca. */
+.list.grid .cell .cell-cover:has(img) { padding: 0; background: none !important; }

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -70,6 +70,9 @@ function googleUrl(query) {
   const key = googleKey();
   return 'https://www.googleapis.com/books/v1/volumes?country=IT&' + query + (key ? '&key=' + encodeURIComponent(key) : '');
 }
+
+/* Proprietari di un libro: elenco di nomi. I libri salvati prima della versione 9 avevano un solo nome. */
+const ownersOf = (b) => (Array.isArray(b.owners) ? b.owners : b.owner ? [b.owner] : []);
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -139,6 +142,7 @@ function fromGoogleItem(item) {
     cover: httpsUrl(img.thumbnail || img.smallThumbnail),
     subjects: v.categories || [],
     description: String(v.description || '').replace(/<[^>]+>/g, ' '),
+    seriesNum: String((v.seriesInfo && v.seriesInfo.bookDisplayNumber) || ''),
   };
 }
 
@@ -213,6 +217,17 @@ function cleanPublisher(name) {
   return cleaned || String(name || '').trim();
 }
 
+/* Guide di viaggio: non hanno un autore persona, quindi si propone il nome della collana. */
+const GUIDE_BRANDS = ['Lonely Planet', 'Touring Club Italiano', 'Touring', 'Routard', 'Michelin', 'Rough Guides', 'Marco Polo', 'National Geographic', 'Baedeker', 'Dumont'];
+function guideAuthor(book) {
+  const text = (book.publisher + ' | ' + book.title).toLowerCase();
+  const brand = GUIDE_BRANDS.find((g) => text.includes(g.toLowerCase()));
+  if (brand) return brand;
+  // In Italia le Lonely Planet escono con l'editore EDT.
+  if (/^edt\b/i.test(book.publisher) && /travel|viagg/i.test((book.subjects || []).join(' '))) return 'Lonely Planet';
+  return '';
+}
+
 /* Interroga i due cataloghi insieme e unisce i risultati:
    per ogni campo vale il primo catalogo che lo ha. */
 async function lookupIsbn(isbn) {
@@ -221,13 +236,19 @@ async function lookupIsbn(isbn) {
   const failed = results.every((r) => r.status === 'rejected');
   const googleDown = results[0].status === 'rejected';
   if (!found.length) return { data: null, failed, googleDown };
-  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '' };
+  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '', seriesNum: '' };
   for (const f of found) {
-    for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover']) if (!merged[k] && f[k]) merged[k] = f[k];
+    for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover', 'seriesNum']) if (!merged[k] && f[k]) merged[k] = f[k];
     merged.subjects.push(...(f.subjects || []));
     if (!merged.description && f.description) merged.description = f.description;
   }
   merged.publisher = cleanPublisher(fixPublisher(isbn, merged.publisher));
+  // Numero del volume scritto nel titolo ("Vol. 2", "Libro 3"), se il catalogo non lo indica.
+  if (!merged.seriesNum) {
+    const m = merged.title.match(/\b(?:vol(?:ume)?\.?|libro|parte)\s*(\d{1,3})\b/i);
+    if (m) merged.seriesNum = m[1];
+  }
+  if (!merged.authors) merged.authors = guideAuthor(merged);
   return { data: merged, failed: false };
 }
 
@@ -362,7 +383,7 @@ function bookRowHtml(b, attr) {
   const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : '', series, b.rating ? '★'.repeat(b.rating) : ''].filter(Boolean).join(' · ');
   const tags = (b.loanTo ? `<span class="tag loan">Prestato a ${esc(b.loanTo)}</span>` : '')
     + (b.list ? `<span class="tag wish">${esc(b.list)}</span>` : '')
-    + (b.owner ? `<span class="tag">${esc(b.owner)}</span>` : '')
+    + ownersOf(b).map((o) => `<span class="tag">${esc(o)}</span>`).join('')
     + (b.genres || []).map((g) => `<span class="tag">${esc(g)}</span>`).join('');
   return `<button class="book" ${attr}>
     ${coverHtml(b)}
@@ -379,7 +400,7 @@ function bookRowHtml(b, attr) {
 function matchesFilter(b) {
   if (!filterGenre) return true;
   if (filterGenre === 'loan') return Boolean(b.loanTo);
-  if (filterGenre.startsWith('owner:')) return b.owner === filterGenre.slice(6);
+  if (filterGenre.startsWith('owner:')) return ownersOf(b).includes(filterGenre.slice(6));
   return (b.genres || []).includes(filterGenre.slice(6));
 }
 
@@ -425,7 +446,7 @@ function renderList() {
     const used = state.genres.filter((g) => owned.some((b) => (b.genres || []).includes(g)));
     // Un filtro alla volta: prestiti, proprietario oppure genere.
     const loans = owned.filter((b) => b.loanTo).length;
-    const people = state.owners.filter((o) => owned.some((b) => b.owner === o));
+    const people = state.owners.filter((o) => owned.some((b) => ownersOf(b).includes(o)));
     const options = [];
     if (loans) options.push(['loan', 'In prestito (' + loans + ')']);
     for (const o of people) options.push(['owner:' + o, o]);
@@ -465,7 +486,7 @@ function openBook(book, opts = {}) {
   current = { book: { ...book }, isNew, selected: new Set(book.genres || []), list: isNew ? (book.list ?? defaultList) : (book.list || '') };
   $('book-heading').textContent = isNew ? 'Nuovo libro' : 'Scheda libro';
   for (const k of FIELDS) $('f-' + k).value = book[k] || '';
-  current.owner = book.owner || '';
+  current.owners = new Set(ownersOf(book));
   current.rating = Number(book.rating) || 0;
   $('f-owner-new').value = '';
   $('f-loan-back').hidden = isNew || !book.loanTo;
@@ -500,7 +521,7 @@ function renderFormCover() {
 
 function renderFormOwners() {
   $('f-owners').innerHTML = state.owners
-    .map((o) => `<button type="button" class="chip${current.owner === o ? ' on' : ''}" data-owner="${esc(o)}" aria-pressed="${current.owner === o}">${esc(o)}</button>`)
+    .map((o) => `<button type="button" class="chip${current.owners.has(o) ? ' on' : ''}" data-owner="${esc(o)}" aria-pressed="${current.owners.has(o)}">${esc(o)}</button>`)
     .join('');
 }
 
@@ -551,7 +572,8 @@ function readForm() {
   b.isbn = toIsbn13(b.isbn) || cleanIsbn(b.isbn);
   b.genres = state.genres.filter((g) => current.selected.has(g));
   b.list = current.list || '';
-  b.owner = current.owner || '';
+  b.owners = state.owners.filter((o) => current.owners.has(o));
+  delete b.owner;
   b.rating = current.rating || 0;
   if (b.loanTo && !b.loanDate) b.loanDate = today();
   if (!b.loanTo) b.loanDate = '';
@@ -902,9 +924,9 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['owner', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Posizione'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Posizione'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
-  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : b[c[0]])).join(';')));
+  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
 }
 
@@ -1108,7 +1130,8 @@ function init() {
   $('f-owners').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
-    current.owner = current.owner === chip.dataset.owner ? '' : chip.dataset.owner;
+    const o = chip.dataset.owner;
+    if (current.owners.has(o)) current.owners.delete(o); else current.owners.add(o);
     renderFormOwners();
   });
   const addFormOwner = () => {
@@ -1116,7 +1139,7 @@ function init() {
     if (!name) return;
     const existing = state.owners.find((o) => o.toLowerCase() === name.toLowerCase());
     if (!existing) { state.owners.push(name); saveState(); }
-    current.owner = existing || name;
+    current.owners.add(existing || name);
     $('f-owner-new').value = '';
     renderFormOwners();
   };

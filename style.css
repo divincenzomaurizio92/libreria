@@ -364,3 +364,5 @@ h1 { font-size: 28px; }
 /* Tenendo premuto non si deve selezionare testo: né nell'elenco né nel riquadro dell'anteprima. */
 .list, .list *, .peek, .peek * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .list [data-id], .peek { -webkit-tap-highlight-color: transparent; }
+.cell-price { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.z3 .cell-price { display: none; }

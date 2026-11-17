@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -77,6 +77,8 @@ function googleUrl(query) {
 
 /* Proprietari di un libro: elenco di nomi. I libri salvati prima della versione 9 avevano un solo nome. */
 const ownersOf = (b) => (Array.isArray(b.owners) ? b.owners : b.owner ? [b.owner] : []);
+
+const euro = (n) => Number(n).toFixed(2).replace('.', ',') + ' €';
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -472,7 +474,7 @@ function isIncomplete(b) {
 
 function bookRowHtml(b, attr) {
   const series = b.series ? b.series + (b.seriesNum ? ' n. ' + b.seriesNum : '') : '';
-  const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : '', series, b.rating ? '★'.repeat(b.rating) : ''].filter(Boolean).join(' · ');
+  const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : '', series, b.rating ? '★'.repeat(b.rating) : '', b.list && Number(b.price) > 0 ? euro(b.price) : ''].filter(Boolean).join(' · ');
   const tags = (b.loanTo ? `<span class="tag loan">Prestato a ${esc(b.loanTo)}</span>` : '')
     + (b.list ? `<span class="tag wish">${esc(b.list)}</span>` : '')
     + ownersOf(b).map((o) => `<span class="tag">${esc(o)}</span>`).join('')
@@ -498,6 +500,7 @@ function gridCellHtml(b) {
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}" data-id="${esc(b.id)}">
     <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
+    ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
     ${b.loanTo ? '<span class="tag loan">In prestito</span>' : ''}
   </button>`;
 }
@@ -580,6 +583,14 @@ function renderList() {
   const many = wish ? ' desideri' : ' libri';
   $('count').textContent = total === 0 ? (wish ? 'Nessun desiderio' : 'Nessun libro')
     : (total === 1 ? one : total + many) + (books.length !== total ? ' · ' + books.length + ' mostrati' : '');
+  // Nei desideri: quanto costa comprare tutti i libri mostrati.
+  if (wish && books.length) {
+    const priced = books.filter((b) => Number(b.price) > 0);
+    if (priced.length) {
+      $('count').textContent += ' · ' + euro(priced.reduce((sum, b) => sum + Number(b.price), 0))
+        + (priced.length < books.length ? ' (' + (books.length - priced.length) + ' senza prezzo)' : '');
+    }
+  }
 
   // Filtri: in libreria i generi usati, nei desideri le liste.
   const chip = (value, label, on) => `<button class="chip${on ? ' on' : ''}" data-genre="${esc(value)}">${esc(label)}</button>`;
@@ -652,7 +663,7 @@ function openPeek(id, anchor) {
   const place = b.shelf ? b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '') : '';
   const facts = [
     ['Genere', (b.genres || []).join(', ')], ['Dove sta', place], ['Di chi è', ownersOf(b).join(', ')],
-    ['Lista', b.list || ''], ['In prestito a', b.loanTo || ''],
+    ['Lista', b.list || ''], ['Prezzo', b.list && Number(b.price) > 0 ? euro(b.price) : ''], ['In prestito a', b.loanTo || ''],
   ].filter(([, v]) => v);
   $('peek-card').innerHTML = `
     <div class="peek-main">
@@ -701,7 +712,7 @@ function renderView(b) {
   const facts = [
     ['Casa editrice', b.publisher], ['Anno di questa edizione', b.year], ['Pagine', b.pages],
     ['Serie', b.series ? b.series + (b.seriesNum ? ', n. ' + b.seriesNum : '') : ''],
-    ['Comprato il', b.boughtAt ? itDate(b.boughtAt) : ''], ['Prezzo', b.price ? Number(b.price).toFixed(2).replace('.', ',') + ' €' : ''],
+    ['Comprato il', b.boughtAt ? itDate(b.boughtAt) : ''], [b.list ? 'Prezzo di copertina' : 'Prezzo pagato', Number(b.price) > 0 ? euro(b.price) : ''],
     ['ISBN', b.isbn],
   ].filter(([, v]) => v);
   const links = storeLinks(b);
@@ -724,6 +735,7 @@ function renderView(b) {
     <div class="view-actions">
       ${b.loanTo ? '<button class="btn primary wide" data-act="returned">È tornato a casa</button>' : ''}
       ${b.list ? '<button class="btn primary wide" data-act="bought">Comprato: sposta in libreria</button>' : ''}
+      ${b.list && !(Number(b.price) > 0) ? '<button class="btn ghost wide" data-act="price">Aggiungi il prezzo di copertina</button>' : ''}
     </div>`;
 }
 
@@ -1454,8 +1466,14 @@ function init() {
     const btn = e.target.closest('[data-act]');
     const b = btn && state.books.find((x) => x.id === viewId);
     if (!b) return;
+    if (btn.dataset.act === 'price') {
+      openBook(b);
+      $('f-price').scrollIntoView({ block: 'center' });
+      $('f-price').focus();
+      return;
+    }
     if (btn.dataset.act === 'returned') { b.loanTo = ''; b.loanDate = ''; }
-    if (btn.dataset.act === 'bought') b.list = '';
+    if (btn.dataset.act === 'bought') { b.list = ''; if (!b.boughtAt) b.boughtAt = today(); }
     b.updatedAt = Date.now();
     saveState();
     renderList();
@@ -1596,6 +1614,7 @@ function init() {
   });
   $('book-bought').addEventListener('click', () => {
     current.list = '';
+    if (!$('f-boughtAt').value) $('f-boughtAt').value = today();
     if (saveBook()) hide('book');
   });
   $('f-owners').addEventListener('click', (e) => {

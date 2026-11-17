@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -59,7 +59,20 @@
   <div class="scan-frame" aria-hidden="true"><span></span></div>
   <div class="scan-top">
     <button class="btn dark" id="scan-close">Chiudi</button>
+    <div class="scan-mode" role="tablist">
+      <button class="on" id="scan-mode-add" role="tab">Aggiungi</button>
+      <button id="scan-mode-check" role="tab">Ce l'ho già?</button>
+    </div>
     <button class="btn dark" id="scan-torch" hidden>Luce</button>
+  </div>
+  <div class="scan-result" id="scan-result" hidden role="status">
+    <p class="scan-answer" id="scan-answer"></p>
+    <p id="scan-detail"></p>
+    <div class="stack">
+      <button class="btn primary wide" id="scan-again">Controlla un altro libro</button>
+      <button class="btn ghost wide" id="scan-open">Apri la scheda</button>
+      <button class="btn ghost wide" id="scan-wish">Aggiungi ai desideri</button>
+    </div>
   </div>
   <div class="scan-bottom">
     <p id="scan-status">Inquadra il codice a barre sul retro del libro</p>
@@ -155,13 +168,67 @@
       </div>
     </div>
 
+    <h3>La vostra copia</h3>
+    <div class="field">
+      <label>Di chi è</label>
+      <div class="chips" id="f-owners"></div>
+      <div class="row">
+        <input id="f-owner-new" type="text" placeholder="Altra persona" aria-label="Altra persona">
+        <button type="button" class="btn ghost" id="f-owner-add">Aggiungi</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Voto</label>
+      <div class="stars" id="f-rating"></div>
+    </div>
+    <div class="field">
+      <label for="f-notes">Commento e note</label>
+      <textarea id="f-notes" rows="3"></textarea>
+    </div>
+    <div class="field">
+      <label for="f-shelf">Posizione in casa</label>
+      <input id="f-shelf" type="text" list="shelf-options" placeholder="Es. Sala, scaffale 2">
+      <datalist id="shelf-options"></datalist>
+    </div>
+    <div class="grid2 wide-first">
+      <div class="field">
+        <label for="f-series">Serie o saga</label>
+        <input id="f-series" type="text" list="series-options">
+        <datalist id="series-options"></datalist>
+      </div>
+      <div class="field">
+        <label for="f-seriesNum">Numero</label>
+        <input id="f-seriesNum" type="number" inputmode="numeric" min="0">
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="f-boughtAt">Comprato il</label>
+        <input id="f-boughtAt" type="date">
+      </div>
+      <div class="field">
+        <label for="f-price">Prezzo (€)</label>
+        <input id="f-price" type="number" inputmode="decimal" min="0" step="0.01">
+      </div>
+    </div>
+
+    <h3>Prestito</h3>
+    <div class="grid2">
+      <div class="field">
+        <label for="f-loanTo">Prestato a</label>
+        <input id="f-loanTo" type="text" placeholder="Nome">
+      </div>
+      <div class="field">
+        <label for="f-loanDate">Dal</label>
+        <input id="f-loanDate" type="date">
+      </div>
+    </div>
+    <button type="button" class="btn ghost wide" id="f-loan-back">È tornato a casa</button>
+
+    <h3>Altro</h3>
     <div class="field" data-key="isbn">
       <label for="f-isbn">ISBN</label>
       <input id="f-isbn" type="text" inputmode="numeric">
-    </div>
-    <div class="field">
-      <label for="f-notes">Note</label>
-      <textarea id="f-notes" rows="3"></textarea>
     </div>
 
     <div class="form-actions">
@@ -219,7 +286,7 @@
 
 <div class="toast" id="toast" hidden role="status"></div>
 
-<script src="vendor/zxing.min.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="vendor/zxing.min.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

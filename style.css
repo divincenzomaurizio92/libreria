@@ -402,3 +402,14 @@ h1 { font-size: 28px; }
   .list.grid.z2 { grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); }
   .sheet-body { max-width: 760px; }
 }
+
+/* Ogni mensola è lunga quanto i suoi libri, più un po' di spazio libero in fondo.
+   */
+.shelf-unit { width: fit-content; max-width: 100%; }
+.shelf-row { padding: 0 34px 0 8px; }
+.list.shelves { grid-template-columns: minmax(0, 1fr); }
+.list.shelves > section { min-width: 0; }
+
+/* La pagina non deve mai diventare più larga dello schermo: è ciò che fa rimpicciolire tutto al browser. */
+html, body { max-width: 100%; overflow-x: clip; }
+.list { min-width: 0; }

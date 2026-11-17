@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -526,8 +526,10 @@ function shelvesHtml(books, wish) {
   const labels = [...groups.keys()].sort((a, b) => (a === empty) - (b === empty) || a.localeCompare(b, 'it'));
   return labels.map((label) => `<section>
     <h3 class="shelf-label">${esc(label)} · ${groups.get(label).length}</h3>
-    <div class="shelf-row">${groups.get(label).map(spineHtml).join('')}</div>
-    <div class="plank"></div>
+    <div class="shelf-unit">
+      <div class="shelf-row">${groups.get(label).map(spineHtml).join('')}</div>
+      <div class="plank"></div>
+    </div>
   </section>`).join('');
 }
 

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -377,9 +377,9 @@ let gridZoom = Number(pref('libreria.zoom', '1')) || 1; // 1 copertine grandi, 2
 let lastAddedId = '';
 
 const VIEWS = {
-  grid: ['Copertine', '<rect x="4" y="4" width="6" height="7"/><rect x="14" y="4" width="6" height="7"/><rect x="4" y="14" width="6" height="7"/><rect x="14" y="14" width="6" height="7"/>'],
-  list: ['Lista', '<path d="M4 6h16M4 12h16M4 18h16"/>'],
-  shelf: ['Scaffale', '<path d="M5 4v14M9 6v12M13 4v14M17 8v10M3 20h18"/>'],
+  grid: ['Copertine', '<rect x="4" y="4" width="6" height="7"/><rect x="14" y="4" width="6" height="7"/><rect x="4" y="14" width="6" height="7"/><rect x="14" y="14" width="6" height="7"/>', 'Le copertine una accanto all\'altra'],
+  list: ['Lista', '<path d="M4 6h16M4 12h16M4 18h16"/>', 'Un libro per riga, con tutti i dettagli'],
+  shelf: ['Scaffale', '<path d="M5 4v14M9 6v12M13 4v14M17 8v10M3 20h18"/>', 'I dorsi sulle mensole, come in casa'],
 };
 
 function setZoom(z) {
@@ -636,8 +636,13 @@ function renderList() {
   }
   const showing = total && books.length;
   $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : '');
-  $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>';
-  $('view-cycle').setAttribute('aria-label', 'Vista: ' + VIEWS[viewKind][0] + '. Tocca per cambiare');
+  // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
+  $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>' + VIEWS[viewKind][0]
+    + '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  $('view-menu').innerHTML = Object.keys(VIEWS).map((k) => `<button data-view="${k}" class="${k === viewKind ? 'on' : ''}">
+      <svg viewBox="0 0 24 24" aria-hidden="true">${VIEWS[k][1]}</svg>
+      <span><b>${VIEWS[k][0]}</b><small>${VIEWS[k][2]}</small></span>
+    </button>`).join('');
   $('shelf-sort').hidden = viewKind !== 'shelf' || wish;
   for (const b of document.querySelectorAll('#shelf-sort [data-sort]')) b.classList.toggle('on', b.dataset.sort === shelfSort);
 }
@@ -1421,13 +1426,23 @@ function init() {
   });
   $('tab-library').addEventListener('click', () => { viewMode = 'library'; renderList(); });
   $('tab-wish').addEventListener('click', () => { viewMode = 'wish'; renderList(); });
-  $('view-cycle').addEventListener('click', () => {
-    const kinds = Object.keys(VIEWS);
-    viewKind = kinds[(kinds.indexOf(viewKind) + 1) % kinds.length];
-    setPref('libreria.view', viewKind);
-    renderList();
-    toast('Vista: ' + VIEWS[viewKind][0]);
+  const closeViewMenu = () => { $('view-menu').hidden = true; $('view-cycle').setAttribute('aria-expanded', 'false'); };
+  $('view-cycle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = $('view-menu').hidden;
+    $('view-menu').hidden = !open;
+    $('view-cycle').setAttribute('aria-expanded', String(open));
   });
+  $('view-menu').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-view]');
+    if (!btn) return;
+    viewKind = btn.dataset.view;
+    setPref('libreria.view', viewKind);
+    closeViewMenu();
+    renderList();
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#view-menu')) closeViewMenu(); });
+  window.addEventListener('scroll', closeViewMenu, { passive: true });
   $('btn-search').addEventListener('click', () => {
     const tools = $('tools');
     tools.hidden = !tools.hidden;

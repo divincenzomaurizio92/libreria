@@ -447,3 +447,5 @@ html, body { max-width: 100%; overflow-x: clip; }
 /* Lo scorrimento laterale nella scheda non deve far tornare indietro il browser. */
 html, body, .sheet, .sheet-body { overscroll-behavior-x: none; }
 #view, #view-body { touch-action: pan-y; }
+#view { overflow: hidden; }
+#view-body { will-change: transform; }

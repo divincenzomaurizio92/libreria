@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 25;
+const APP_VERSION = 26;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1606,19 +1606,55 @@ function init() {
   }, { passive: true });
 
   // Scheda da leggere: scorrendo con il dito a sinistra o a destra si passa al libro dopo o prima.
-  let swipe = null;
-  $('view').addEventListener('touchstart', (e) => { swipe = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
-  $('view').addEventListener('touchend', (e) => {
-    if (!swipe) return;
-    const dx = e.changedTouches[0].clientX - swipe.x;
-    const dy = e.changedTouches[0].clientY - swipe.y;
-    swipe = null;
-    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 2) return;
-    const i = visibleIds.indexOf(viewId);
-    const next = state.books.find((b) => b.id === visibleIds[i + (dx < 0 ? 1 : -1)]);
-    if (i < 0 || !next) return toast(dx < 0 ? 'È l\'ultimo libro dell\'elenco.' : 'È il primo libro dell\'elenco.');
-    openView(next);
+  // La scheda segue il dito: si trascina di lato, esce, e quella del libro vicino entra dal lato opposto.
+  let drag = null;
+  const card = $('view-body');
+  const neighbor = (dir) => { const i = visibleIds.indexOf(viewId); return i < 0 ? null : state.books.find((b) => b.id === visibleIds[i + dir]) || null; };
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  $('view').addEventListener('touchstart', (e) => {
+    drag = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), dx: 0, on: false } : null;
   }, { passive: true });
+  $('view').addEventListener('touchmove', (e) => {
+    if (!drag) return;
+    const dx = e.touches[0].clientX - drag.x;
+    const dy = e.touches[0].clientY - drag.y;
+    if (!drag.on) {
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) { drag.on = true; card.style.transition = 'none'; }
+      else { if (Math.abs(dy) > 12) drag = null; return; }
+    }
+    // Se da quel lato non c'è un altro libro, la scheda oppone resistenza.
+    drag.dx = neighbor(dx < 0 ? 1 : -1) ? dx : dx * 0.25;
+    card.style.transform = 'translateX(' + drag.dx + 'px)';
+    card.style.opacity = String(1 - Math.min(0.5, Math.abs(drag.dx) / 600));
+  }, { passive: true });
+  const endDrag = () => {
+    if (!drag || !drag.on) { drag = null; return; }
+    const dx = drag.dx;
+    const fast = Math.abs(dx) / Math.max(1, Date.now() - drag.t) > 0.5;
+    const dir = dx < 0 ? 1 : -1;
+    const next = neighbor(dir);
+    drag = null;
+    card.style.transition = calm ? 'none' : 'transform .18s ease-out, opacity .18s ease-out';
+    if (next && (Math.abs(dx) > 90 || (fast && Math.abs(dx) > 30))) {
+      card.style.transform = 'translateX(' + (-dir * 100) + '%)';
+      card.style.opacity = '0';
+      setTimeout(() => {
+        openView(next);
+        card.style.transition = 'none';
+        card.style.transform = 'translateX(' + (dir * 55) + '%)';
+        void card.offsetWidth; // fa partire l'animazione di ingresso dalla nuova posizione
+        card.style.transition = calm ? 'none' : 'transform .24s cubic-bezier(.2, .8, .2, 1), opacity .24s ease-out';
+        card.style.transform = '';
+        card.style.opacity = '';
+      }, calm ? 0 : 170);
+    } else {
+      card.style.transform = '';
+      card.style.opacity = '';
+      if (!next && Math.abs(dx) > 18) toast(dir > 0 ? 'È l\'ultimo libro dell\'elenco.' : 'È il primo libro dell\'elenco.');
+    }
+  };
+  $('view').addEventListener('touchend', endDrag, { passive: true });
+  $('view').addEventListener('touchcancel', endDrag, { passive: true });
   $('view-close').addEventListener('click', () => hide('view'));
   $('view-edit').addEventListener('click', () => { const b = state.books.find((x) => x.id === viewId); if (b) openBook(b); });
   $('view-body').addEventListener('click', (e) => {

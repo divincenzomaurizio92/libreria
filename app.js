@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 44;
+const APP_VERSION = 45; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -2717,4 +2717,27 @@ function openManual() {
   $('manual-q').focus();
 }
 
+/* Aggiornamento automatico. version.json dice qual è l'ultima versione pubblicata.
+   All'apertura (e quando si torna all'app) se ce n'è una più nuova:
+   - se non c'è niente di aperto, la pagina si ricarica da sola sulla versione nuova;
+   - se si sta compilando una scheda, compare un avviso e si aggiorna quando si vuole.
+   I libri stanno nella memoria del telefono: ricaricare non li tocca. */
+async function checkUpdate() {
+  if (!navigator.onLine) return;
+  let latest = 0;
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    latest = Number((await r.json()).version) || 0;
+  } catch (e) { return; }
+  if (latest <= APP_VERSION) return;
+  const go = () => location.replace(location.pathname + '?v=' + latest);
+  let tried = '';
+  try { tried = sessionStorage.getItem('libreria.updateTried'); sessionStorage.setItem('libreria.updateTried', String(latest)); } catch (e) { /* niente */ }
+  if (topLayer() === null && tried !== String(latest)) return go();
+  $('update-bar').hidden = false;
+  $('update-go').onclick = go;
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
+
 init();
+checkUpdate();

@@ -663,3 +663,8 @@ body::before {
 
 /* v44 */
 .steps { margin: 0 0 8px; padding-left: 22px; display: grid; gap: 6px; font-size: 15px; }
+
+/* v45: avviso di versione nuova */
+.update-bar { position: fixed; left: 16px; right: 16px; top: calc(10px + env(safe-area-inset-top)); z-index: 60; max-width: 520px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 16px; border-radius: 14px; background: var(--surface); color: var(--ink); border: 1px solid var(--accent); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); font-weight: 600; }
+.update-bar[hidden] { display: none; }
+.update-bar .btn { min-height: 40px; }

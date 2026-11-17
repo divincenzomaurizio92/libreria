@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 40;
+const APP_VERSION = 41;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -725,6 +725,58 @@ function railsHtml(owned) {
   </section>`;
 }
 
+/* «Da scoprire», in cima ai Desideri: i più venduti e i libri simili ai vostri.
+   Li preparerà ogni settimana la parte online (Claude con la ricerca web) e li salverà qui:
+   { updatedAt, bestsellers: [{ title, authors, isbn, cover, reason }], similar: [...] }.
+   Finché non ci sono, la sezione mostra cosa arriverà. */
+const DISCOVER_KEY = 'libreria.discover';
+let discoverItems = [];
+function loadDiscover() {
+  try { const d = JSON.parse(localStorage.getItem(DISCOVER_KEY) || 'null'); return d && typeof d === 'object' ? d : null; } catch (e) { return null; }
+}
+const normTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9à-ù]+/g, ' ').trim();
+function haveIt(item) {
+  return state.books.find((b) => (item.isbn && b.isbn === item.isbn) || (normTitle(b.title) && normTitle(b.title) === normTitle(item.title)));
+}
+function discoverHtml() {
+  const d = loadDiscover();
+  discoverItems = [];
+  const rail = (title, items) => {
+    if (!items || !items.length) return '';
+    const cells = items.slice(0, 15).map((it) => {
+      const i = discoverItems.push(it) - 1;
+      const own = haveIt(it);
+      const color = SPINE_COLORS[hashOf(it.title || '') % SPINE_COLORS.length];
+      const inner = it.cover
+        ? `<img src="${esc(httpsUrl(it.cover))}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+        : `<span class="ph-title">${esc(it.title || '')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(it.authors))}</span>`;
+      return `<button class="cell disc" data-disc="${i}">
+        <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${own ? `<span class="badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
+        <span class="cell-title">${esc(it.title || '')}</span>
+        ${it.reason ? `<span class="disc-reason">${esc(it.reason)}</span>` : ''}
+      </button>`;
+    }).join('');
+    return `<p class="disc-sub">${title}</p><div class="rail">${cells}</div>`;
+  };
+  const body = d ? rail('I più venduti in Italia', d.bestsellers) + rail('Simili ai vostri', d.similar) : '';
+  const when = d && d.updatedAt ? ' · aggiornato il ' + new Date(d.updatedAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }) : '';
+  return `<section class="rail-sec discover">
+    <h3 class="rail-label">Da scoprire<small>${esc(when)}</small></h3>
+    ${body || `<div class="disc-empty">
+      <div class="disc-ghosts" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <p><strong>Presto, ogni settimana</strong>I libri più venduti in Italia e quelli simili ai vostri, scelti da Claude a partire dai libri che avete votato bene e dai vostri temi. Con un tocco finiscono nei desideri.</p>
+    </div>`}
+  </section>`;
+}
+function openDiscover(i) {
+  const it = discoverItems[i];
+  if (!it) return;
+  const own = haveIt(it);
+  if (own) return openView(own);
+  if (it.isbn && toIsbn13(it.isbn)) return handleIsbn(toIsbn13(it.isbn));
+  openBook({ title: it.title || '', authors: it.authors || '', cover: it.cover ? httpsUrl(it.cover) : '', genres: [] }, { banner: it.reason ? 'Suggerito da Claude: ' + it.reason : '' });
+}
+
 function greeting() {
   const h = new Date().getHours();
   const word = h >= 5 && h < 13 ? 'Buongiorno' : h >= 13 && h < 18 ? 'Buon pomeriggio' : 'Buonasera';
@@ -845,6 +897,8 @@ function renderList() {
         : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
     }
   }
+  // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».
+  if (wish && !q && !filterList) $('list').insertAdjacentHTML('afterbegin', discoverHtml());
   visibleIds = books.map((b) => b.id);
   $('btn-back').hidden = !backTo;
   const showing = total && books.length;
@@ -2087,6 +2141,7 @@ function init() {
     else if (ratio < 0.8) { pinch.done = true; setZoom(gridZoom + 1); }
   }, { passive: true });
   $('list').addEventListener('touchend', () => { pinch = null; }, { passive: true });
+  $('list').addEventListener('click', (e) => { const d = e.target.closest('[data-disc]'); if (d) openDiscover(Number(d.dataset.disc)); });
 
   // La testata si ritira scorrendo verso il basso e torna risalendo.
   let lastY = 0;

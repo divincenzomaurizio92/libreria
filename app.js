@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 45; // va tenuto uguale al numero in version.json
+const APP_VERSION = 46; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -580,8 +580,8 @@ function groupBooks(books, by) {
   return [...groups].sort((a, b) => (a[0] === empty) - (b[0] === empty) || b[1].length - a[1].length || a[0].localeCompare(b[0], 'it'));
 }
 
-function shelvesHtml(books, wish, forced) {
-  const mode = forced || shelfSort;
+/* Le mensole dello Scaffale: per stanza, genere o persona. Le usa anche «Tutti i libri» in home. */
+function shelfGroups(books, mode, wish) {
   const empty = wish ? '' : mode === 'room' ? 'Senza posto' : mode === 'owner' ? 'Di casa' : 'Senza genere';
   const keysOf = (b) => {
     if (wish) return [b.list];
@@ -600,6 +600,12 @@ function shelvesHtml(books, wish, forced) {
     || total[base(b)] - total[base(a)]
     || base(a).localeCompare(base(b), 'it')
     || a.localeCompare(b, 'it', { numeric: true }));
+  return labels.map((label) => [label, groups.get(label), label === empty]);
+}
+
+function shelvesHtml(books, wish, forced) {
+  const groups = new Map(shelfGroups(books, forced || shelfSort, wish).map(([l, items]) => [l, items]));
+  const labels = [...groups.keys()];
   return labels.map((label) => `<section>
     <h3 class="shelf-label">${esc(label)} · ${groups.get(label).length}</h3>
     <div class="shelf-unit">
@@ -723,7 +729,23 @@ function homeSections(owned) {
     ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded), ''],
   ].filter(([, items, empty]) => items.length || empty);
 }
-let ALL_LABEL = '<h3 class="rail-label all-label">Tutti i libri</h3>';
+/* «Tutti i libri» diviso come lo Scaffale (stanza, genere o persona), con la scelta a destra del titolo.
+   Se il filtro attivo è già su quel criterio (es. una persona e «Persona»), si divide per il criterio successivo. */
+let homeOrder = null;
+function homeGroupsHtml(books, asGrid) {
+  const kinds = filterParts().map(filterKind);
+  const mode = [shelfSort, 'room', 'genre', 'owner'].find((m) => !kinds.includes(m === 'room' ? 'place' : m)) || 'genre';
+  const groups = shelfGroups(books, mode, false);
+  const only = groups.length === 1 && groups[0][2]; // tutti senza posto/genere/persona: niente divisione finta
+  const seen = new Set();
+  homeOrder = groups.flatMap(([, items]) => items).filter((b) => !seen.has(b.id) && seen.add(b.id));
+  const sw = ['room', 'genre', 'owner'].map((m) => `<button data-hsort="${m}" class="${m === mode ? 'on' : ''}" aria-pressed="${m === mode}">${{ room: 'Stanza', genre: 'Genere', owner: 'Persona' }[m]}</button>`).join('');
+  const head = `<div class="all-head"><h3 class="rail-label all-label">${filterGenre ? 'Tutti' : 'Tutti i libri'}<small>${books.length}</small></h3><div class="hsort" role="group" aria-label="Dividi per">${sw}</div></div>`;
+  const body = (items) => (asGrid ? shelfRowsHtml(items) : items.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join(''));
+  if (only) return head + body(books);
+  return head + groups.map(([label, items]) => `<section class="home-group"><p class="group-label">${esc(label)}<small>${items.length}</small></p>${body(items)}</section>`).join('');
+}
+const ALL_LABEL = '';
 function railsHtml(owned) {
   return homeSections(owned).map(([title, items, empty]) => `<section class="rail-sec">
     <h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>
@@ -907,12 +929,15 @@ function renderList() {
       // Stesse sezioni anche filtrando per persona, genere, tema…: non se il filtro è già sullo stato di lettura.
       const sections = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped
         && !filterParts().some((p) => p.startsWith('status:')) && (filterGenre ? homeSections(books).length > 0 : owned.length >= 6);
-      ALL_LABEL = `<h3 class="rail-label all-label">${filterGenre ? 'Tutti' : 'Tutti i libri'}${filterGenre ? `<small>${books.length}</small>` : ''}</h3>`;
       owned = filterGenre ? books : owned;
-      $('list').innerHTML = home ? (sections ? railsHtml(owned) : '') + shelfRowsHtml(books)
+      // «Tutti i libri» si divide come lo Scaffale quando si guarda la libreria nell'ordine normale.
+      const split = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped;
+      homeOrder = null;
+      $('list').innerHTML = home ? (sections ? railsHtml(owned) : '') + (split ? homeGroupsHtml(books, true) : shelfRowsHtml(books))
         : viewKind === 'grid' ? books.map(gridCellHtml).join('')
         : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
-        : (sections ? listSectionsHtml(owned) : '') + books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
+        : (sections ? listSectionsHtml(owned) : '') + (split ? homeGroupsHtml(books, false) : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join(''));
+      if (homeOrder) books = homeOrder;
     }
   }
   // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».
@@ -2380,6 +2405,13 @@ function init() {
   });
   $('covers-sharpen').addEventListener('click', sharpenCovers);
   $('place-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') addSettingsPlace(); });
+  $('list').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-hsort]');
+    if (!btn) return;
+    shelfSort = btn.dataset.hsort;
+    setPref('libreria.shelfSort', shelfSort);
+    renderList();
+  });
   $('shelf-sort').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-sort]');
     if (!btn) return;

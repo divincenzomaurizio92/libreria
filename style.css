@@ -621,3 +621,11 @@ body::before {
 .rail { scroll-padding-left: 24px; scroll-padding-right: 24px; }
 .rail .cell { flex-basis: 80px; }
 .top .count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* v40: una sola mensola in alto, stessa grandezza della griglia, titolo discreto */
+.rail .cell { flex-basis: var(--rail-w, 80px); }
+.z2 .rail { gap: 12px; } .z3 .rail { gap: 10px; }
+.rail-label { font: 600 12px/1.2 var(--font-body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.rail-label small { font-size: 12px; letter-spacing: 0; }
+.rail-sec { margin-bottom: 18px; }
+.all-label { margin-top: 4px; margin-bottom: 10px; }

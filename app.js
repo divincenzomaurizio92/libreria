@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 39;
+const APP_VERSION = 40;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -715,16 +715,14 @@ function shelfRowsHtml(books) {
 /* In cima alla libreria, senza filtri: file da scorrere di lato con i libri del momento. */
 function railsHtml(owned) {
   const byAdded = (a, b) => (b.addedAt || 0) - (a.addedAt || 0);
-  const rails = [
-    ['In lettura', owned.filter((b) => b.status === 'reading').sort(byAdded)],
-    ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded)],
-    ['Ultimi arrivati', [...owned].sort(byAdded).slice(0, 12)],
-  ].filter(([, items]) => items.length);
-  return rails.map(([title, items]) => `<section class="rail-sec">
-    <h3 class="rail-label">${title}<small>${items.length}</small></h3>
-    <div class="rail">${items.map(gridCellHtml).join('')}</div>
+  // Una sola mensola: prima i libri in lettura, poi quelli da leggere. Se sono tanti, si scorre di lato.
+  const items = [...owned.filter((b) => b.status === 'reading').sort(byAdded), ...owned.filter((b) => b.status === 'toread').sort(byAdded)];
+  if (!items.length) return '';
+  return `<section class="rail-sec">
+    <h3 class="rail-label">Sul comodino<small>${items.length}</small></h3>
+    <div class="rail" style="--rail-w:${[0, 98, 74, 58][gridZoom]}px">${items.map(gridCellHtml).join('')}</div>
     <div class="plank"></div>
-  </section>`).join('');
+  </section>`;
 }
 
 function greeting() {
@@ -841,7 +839,7 @@ function renderList() {
     } else {
       const home = !wish && !audio && viewKind === 'grid';
       const rails = home && !filterGenre && !q && sort === 'recent' && owned.length >= 6;
-      $('list').innerHTML = home ? (rails ? railsHtml(owned) + '<h3 class="rail-label all-label">Tutti i libri</h3>' : '') + shelfRowsHtml(books)
+      $('list').innerHTML = home ? (rails && railsHtml(owned) ? railsHtml(owned) + '<h3 class="rail-label all-label">Tutti i libri</h3>' : '') + shelfRowsHtml(books)
         : viewKind === 'grid' ? books.map(gridCellHtml).join('')
         : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
         : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');

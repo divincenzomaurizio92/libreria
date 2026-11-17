@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -82,9 +82,16 @@ const ownersOf = (b) => (Array.isArray(b.owners) ? b.owners : b.owner ? [b.owner
 const STATUS = { toread: 'Da leggere', reading: 'In corso', read: 'Letto' };
 let stickyStatus = ''; // lo stato scelto resta proposto mentre si scansionano più libri di fila
 
+/* "Letto nel" è un testo libero e facoltativo (un anno, una data): catalogando una libreria intera
+   si segnano come letti libri finiti anni fa, e la data di oggi sarebbe falsa.
+   Si compila da sola solo quando un libro passa da "In corso" a "Letto": quello è finito davvero adesso. */
+const todayIt = () => new Date().toLocaleDateString('it-IT');
+const showRead = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? itDate(v) : v);
+
 function setStatus(b, status) {
+  const before = b.status || '';
   b.status = status || '';
-  if (b.status === 'read') { if (!b.readAt) b.readAt = today(); } else b.readAt = '';
+  if (b.status === 'read') { if (!b.readAt && before === 'reading') b.readAt = todayIt(); } else b.readAt = '';
   if (b.status === 'reading' && !b.startedAt) b.startedAt = today();
 }
 
@@ -776,7 +783,7 @@ function renderView(b) {
   const tags = [...(b.list ? [b.list] : []), ...(b.genres || []), ...ownersOf(b).map((o) => 'Di ' + o),
     ...(b.shelf ? [b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '')] : [])];
   const facts = [
-    ['Letto il', b.status === 'read' && b.readAt ? itDate(b.readAt) : ''],
+    ['Letto nel', b.status === 'read' && b.readAt ? showRead(b.readAt) : ''],
     ['In lettura da', b.status === 'reading' && b.startedAt ? new Date(b.startedAt).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : ''],
     ['Casa editrice', b.publisher], ['Anno di questa edizione', b.year], ['Pagine', b.pages],
     ['Serie', b.series ? b.series + (b.seriesNum ? ', n. ' + b.seriesNum : '') : ''],
@@ -804,6 +811,7 @@ function renderView(b) {
     <div class="view-actions">
       ${b.loanTo ? '<button class="btn primary wide" data-act="returned">È tornato a casa</button>' : ''}
       ${b.list ? '<button class="btn primary wide" data-act="bought">Comprato: sposta in libreria</button>' : ''}
+      ${b.status === 'read' && !b.readAt ? '<button class="btn ghost wide" data-act="readdate">Aggiungi quando l\'hai letto</button>' : ''}
       ${b.list && !(Number(b.price) > 0) ? '<button class="btn ghost wide" data-act="price">Aggiungi il prezzo di copertina</button>' : ''}
     </div>`;
 }
@@ -880,7 +888,7 @@ function renderFormStatus() {
   // Lo stato di lettura vale per i libri posseduti, non per i desideri.
   $('f-status-field').hidden = Boolean(current.list);
   $('f-readAt-field').hidden = current.status !== 'read';
-  if (current.status === 'read' && !$('f-readAt').value) $('f-readAt').value = today();
+  if (current.status === 'read' && !$('f-readAt').value && current.book.status === 'reading') $('f-readAt').value = todayIt();
 }
 
 function renderFormPlaces() {
@@ -1312,7 +1320,7 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto il'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
   const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : c[0] === 'status' ? (STATUS[b.status] || '') : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
@@ -1593,6 +1601,12 @@ function init() {
     const btn = e.target.closest('[data-act]');
     const b = btn && state.books.find((x) => x.id === viewId);
     if (!b) return;
+    if (btn.dataset.act === 'readdate') {
+      openBook(b);
+      $('f-readAt').scrollIntoView({ block: 'center' });
+      $('f-readAt').focus();
+      return;
+    }
     if (btn.dataset.act === 'price') {
       openBook(b);
       $('f-price').scrollIntoView({ block: 'center' });

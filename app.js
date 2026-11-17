@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 43;
+const APP_VERSION = 44;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -717,12 +717,13 @@ function shelfRowsHtml(books) {
    Sul comodino (i libri in corso, sempre presente) e Da leggere (solo se ce ne sono). */
 function homeSections(owned) {
   const byAdded = (a, b) => (b.addedAt || 0) - (a.addedAt || 0);
+  // Con un filtro attivo le sezioni vuote spariscono; senza filtri «Sul comodino» resta sempre, come invito.
   return [
-    ['Sul comodino', owned.filter((b) => b.status === 'reading').sort(byAdded), 'Nessun libro in corso. Apri un libro e tocca «In corso»: lo troverai qui.'],
+    ['Sul comodino', owned.filter((b) => b.status === 'reading').sort(byAdded), filterGenre ? '' : 'Nessun libro in corso. Apri un libro e tocca «In corso»: lo troverai qui.'],
     ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded), ''],
   ].filter(([, items, empty]) => items.length || empty);
 }
-const ALL_LABEL = '<h3 class="rail-label all-label">Tutti i libri</h3>';
+let ALL_LABEL = '<h3 class="rail-label all-label">Tutti i libri</h3>';
 function railsHtml(owned) {
   return homeSections(owned).map(([title, items, empty]) => `<section class="rail-sec">
     <h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>
@@ -802,7 +803,7 @@ function renderList() {
   const wish = viewMode === 'wish';
   const audio = viewMode === 'audio';
   const grouped = !wish && !audio && Boolean(groupBy) && filterGenre === groupFor;
-  const owned = state.books.filter(isOwned);
+  let owned = state.books.filter(isOwned);
   const wished = state.books.filter((b) => b.list);
   const heard = state.books.filter((b) => mediaOf(b).includes('audio'));
   const base = wish ? wished : audio ? heard : owned;
@@ -810,7 +811,7 @@ function renderList() {
     if (wish && filterList && b.list !== filterList) return false;
     if (!wish && !audio && !matchesFilter(b)) return false;
     if (!q) return true;
-    return [b.title, b.authors, b.publisher, b.isbn, b.notes].some((x) => String(x || '').toLowerCase().includes(q));
+    return [b.title, b.authors, b.publisher, b.isbn, b.barcode, b.notes].some((x) => String(x || '').toLowerCase().includes(q));
   });
   const byText = (k) => (a, b) => String(a[k] || '').localeCompare(String(b[k] || ''), 'it', { sensitivity: 'base' });
   if (sort === 'title') books.sort(byText('title'));
@@ -903,7 +904,11 @@ function renderList() {
     } else {
       const home = !wish && !audio && viewKind === 'grid';
       // Copertine e lista hanno le stesse sezioni, nello stesso ordine.
-      const sections = !wish && !audio && viewKind !== 'shelf' && !filterGenre && !q && sort === 'recent' && owned.length >= 6;
+      // Stesse sezioni anche filtrando per persona, genere, tema…: non se il filtro è già sullo stato di lettura.
+      const sections = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped
+        && !filterParts().some((p) => p.startsWith('status:')) && (filterGenre ? homeSections(books).length > 0 : owned.length >= 6);
+      ALL_LABEL = `<h3 class="rail-label all-label">${filterGenre ? 'Tutti' : 'Tutti i libri'}${filterGenre ? `<small>${books.length}</small>` : ''}</h3>`;
+      owned = filterGenre ? books : owned;
       $('list').innerHTML = home ? (sections ? railsHtml(owned) : '') + shelfRowsHtml(books)
         : viewKind === 'grid' ? books.map(gridCellHtml).join('')
         : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
@@ -1477,11 +1482,25 @@ async function scanTick() {
   }
 }
 
+/* Codici che non sono ISBN ma stanno sui libri: 977 dei volumi da edicola, codici interni dei libri vecchi.
+   Non si trovano nei cataloghi, ma si tengono nella scheda: così «Ce l'ho già?» li riconosce la volta dopo. */
+let pendingBarcode = '';
+const otherCode = (text) => { const c = String(text || '').replace(/\D/g, ''); return /^\d{8,14}$/.test(c) ? c : ''; };
+const byBarcode = (code) => state.books.find((b) => b.barcode === code);
+
 async function onCode(text) {
   const isbn = toIsbn13(text);
   if (!isbn) {
-    setScanStatus('Questo codice non è un ISBN. Cerca il codice che inizia con 978 o 979.');
-    return;
+    const code = otherCode(text);
+    if (!code) { setScanStatus('Questo codice non è un ISBN. Cerca il codice che inizia con 978 o 979.'); return; }
+    if (scan.mode === 'check') return showCheckResult('', code);
+    if (scan.mode === 'batch') return batchCode('', code);
+    stopCamera();
+    if (navigator.vibrate) navigator.vibrate(60);
+    hide('scanner');
+    const known = byBarcode(code);
+    if (known) return openBook(known, { banner: 'Questo libro è già ' + (known.list ? 'nella lista «' + known.list + '».' : 'in libreria.') });
+    return openManualForCode(code);
   }
   if (scan.mode === 'check') return showCheckResult(isbn);
   if (scan.mode === 'batch') return batchCode(isbn);
@@ -1531,10 +1550,11 @@ function flashFrame(kind) {
   setTimeout(() => f.classList.remove(kind), 600);
 }
 
-function batchCode(isbn) {
-  if (batch.seen.has(isbn)) return; // il codice resta inquadrato per qualche istante: si conta una volta sola
-  batch.seen.add(isbn);
-  const dup = state.books.find((b) => b.isbn === isbn);
+function batchCode(isbn, code) {
+  const key = isbn || code;
+  if (batch.seen.has(key)) return; // il codice resta inquadrato per qualche istante: si conta una volta sola
+  batch.seen.add(key);
+  const dup = isbn ? state.books.find((b) => b.isbn === isbn) : byBarcode(code);
   if (dup) {
     if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
     flashFrame('dup');
@@ -1544,6 +1564,16 @@ function batchCode(isbn) {
   if (navigator.vibrate) navigator.vibrate(60);
   beep();
   flashFrame('hit');
+  if (code) {
+    // Niente da cercare: il libro entra con il solo codice e va completato a mano nel riepilogo.
+    const b = { id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: '', barcode: code, title: '', genres: [], owners: [], list: '', status: '' };
+    state.books.push(b);
+    saveState();
+    batch.items.push({ isbn: '', code, state: 'code', id: b.id });
+    setScanStatus('Codice da edicola o interno: lo completi alla fine');
+    renderBatchBar();
+    return;
+  }
   batch.items.push({ isbn, state: 'wait', id: '' });
   setScanStatus('Preso. Avanti il prossimo');
   renderBatchBar();
@@ -1621,7 +1651,7 @@ function renderBatch() {
   $('batch-apply').hidden = !books.length;
   const order = (r) => (r[0].state === 'wait' ? 2 : r[1] && (r[0].state !== 'ok' || isIncomplete(r[1])) ? 0 : 1);
   $('batch-list').innerHTML = [...rows].sort((a, b) => order(a) - order(b)).map(([it, b]) => (b
-    ? bookRowHtml(it.state === 'ok' ? b : { ...b, title: b.title || (it.state === 'failed' ? 'Non cercato: mancava la connessione' : 'Non trovato nei cataloghi'), authors: b.authors || 'ISBN ' + it.isbn }, `data-id="${esc(b.id)}"`)
+    ? bookRowHtml(it.state === 'ok' ? b : { ...b, title: b.title || (it.state === 'code' ? 'Codice da edicola o interno: scrivi il titolo' : it.state === 'failed' ? 'Non cercato: mancava la connessione' : 'Non trovato nei cataloghi'), authors: b.authors || (it.code ? 'Codice ' + it.code : 'ISBN ' + it.isbn) }, `data-id="${esc(b.id)}"`)
     : `<div class="book"><div class="cover">…</div><span class="book-info"><span class="book-title">Sto cercando…</span><span class="book-author">ISBN ${esc(it.isbn)}</span></span></div>`)).join('');
 }
 
@@ -1645,15 +1675,16 @@ function batchApply(change) {
   renderList();
 }
 
-function showCheckResult(isbn) {
-  const book = state.books.find((b) => b.isbn === isbn);
+function showCheckResult(isbn, code) {
+  const book = isbn ? state.books.find((b) => b.isbn === isbn) : byBarcode(code);
   scan.paused = true;
   scan.found = book || null;
   scan.isbn = isbn;
+  scan.code = code || '';
   if (navigator.vibrate) navigator.vibrate(book && !book.list ? [60, 60, 60] : 60);
   const digital = book && !book.list && !hasPaper(book);
   $('scan-answer').textContent = !book ? 'No, non ce l\'avete' : book.list ? 'È tra i desideri' : digital ? 'Di carta no' : 'Sì, ce l\'avete già';
-  $('scan-detail').textContent = !book ? 'ISBN ' + isbn
+  $('scan-detail').textContent = !book ? (isbn ? 'ISBN ' + isbn : 'Codice ' + code + ': non è un ISBN, quindi lo riconosco solo se l\'avete già inserito con questo codice.')
     : '«' + book.title + '»' + (book.list ? ' è nella lista ' + book.list + '.' : digital ? ' lo avete solo su ' + mediaOf(book).map((m) => MEDIA[m]).join(' e ') + '.' : book.loanTo ? ' è in libreria, in prestito a ' + book.loanTo + '.' : ' è in libreria' + (book.shelf ? ': ' + book.shelf : '') + '.');
   $('scan-open').hidden = !book;
   $('scan-wish').hidden = Boolean(book);
@@ -1744,10 +1775,15 @@ function pickManualResult(i) {
   const data = manualResults[i];
   if (!data) return;
   const toAudio = viewMode === 'audio';
-  const dup = data.isbn && state.books.find((b) => b.isbn === data.isbn);
+  // Per un libro da edicola il risultato è un'altra edizione: niente controllo doppioni sul suo ISBN.
+  const dup = !pendingBarcode && data.isbn && state.books.find((b) => b.isbn === data.isbn);
   hide('manual');
   if (dup) return openBook(dup, { banner: dup.list ? 'Questo libro è già nella lista desideri «' + dup.list + '».' : 'Questo libro è già in libreria.' });
   const s = suggestGenres(data.subjects, data.authors, data.description);
+  const code = pendingBarcode;
+  pendingBarcode = '';
+  if (code) return openBook({ ...data, isbn: '', barcode: code, subjects: undefined, description: undefined, plot: data.description || '', plotTried: true, genres: s.genres },
+    { banner: 'Codice ' + code + ' salvato nella scheda. Titolo, autore e trama vengono da un\'altra edizione: controlla editore, anno e copertina.' });
   openBook({ ...data, list: toAudio ? '' : undefined, media: toAudio ? ['audio'] : undefined, subjects: undefined, description: undefined, plot: data.description || '', plotTried: true, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
 }
 
@@ -1804,7 +1840,26 @@ async function restoreBackup(file) {
   }
 }
 
+/* Icona sulla schermata Home. Chrome su Android offre l'installazione diretta; su iPhone si passa da Condividi. */
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; if (!$('settings').hidden) renderInstall(); });
+window.addEventListener('appinstalled', () => { installEvent = null; toast('Icona aggiunta alla schermata Home.'); renderInstall(); });
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function renderInstall() {
+  const box = $('install-box');
+  if (isStandalone()) { box.innerHTML = '<p class="hint">Stai già usando l\'app dalla schermata Home.</p>'; return; }
+  box.innerHTML = installEvent
+    ? '<button class="btn primary wide" id="install-go">Aggiungi l\'icona alla schermata Home</button>'
+    : isIos()
+    ? `<ol class="steps"><li>Apri questa pagina in <b>Safari</b>.</li><li>Tocca <b>Condividi</b> (il quadrato con la freccia in su).</li><li>Scegli <b>Aggiungi alla schermata Home</b>, poi <b>Aggiungi</b>.</li></ol>
+       <p class="hint">Attenzione: su iPhone l'app aperta dall'icona ha una memoria sua, separata da Safari. Finché non c'è la parte online, inserite i libri sempre dallo stesso posto (meglio dall'icona).</p>`
+    : `<ol class="steps"><li>Apri questa pagina in <b>Chrome</b>.</li><li>Tocca i <b>tre puntini</b> in alto a destra.</li><li>Scegli <b>Aggiungi a schermata Home</b> (o <b>Installa app</b>), poi <b>Installa</b>.</li></ol>
+       <p class="hint">Su Android l'app dall'icona usa gli stessi dati di Chrome: ritrovi tutti i libri.</p>`;
+}
+
 function renderSettings() {
+  renderInstall();
   const n = state.books.length;
   $('settings-info').textContent = (n === 1 ? '1 libro salvato' : n + ' libri salvati')
     + ' su questo telefono. Per ora i dati restano solo qui: scarica un backup ogni tanto.';
@@ -2303,6 +2358,13 @@ function init() {
     renderList();
   });
   $('owner-add').addEventListener('click', addSettingsOwner);
+  $('install-box').addEventListener('click', async (e) => {
+    if (!e.target.closest('#install-go') || !installEvent) return;
+    installEvent.prompt();
+    try { await installEvent.userChoice; } catch (err) { /* scelta annullata */ }
+    installEvent = null;
+    renderInstall();
+  });
   $('me-pick').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-me]');
     if (!chip) return;
@@ -2425,15 +2487,17 @@ function init() {
   $('batch-list').addEventListener('click', (e) => {
     const row = e.target.closest('[data-id]');
     const b = row && state.books.find((x) => x.id === row.dataset.id);
+    if (b && b.barcode && !b.title) return openBook(b, { banner: 'Il codice ' + b.barcode + ' non è un ISBN (volume da edicola o libro vecchio). Scrivi titolo e autore. Se trovi l\'ISBN stampato all\'interno, scrivilo in fondo alla scheda e tocca «Completa i campi vuoti dai cataloghi».' });
     if (b) openBook(b);
   });
   $('scan-again').addEventListener('click', () => setScanMode('check'));
   $('scan-open').addEventListener('click', () => { const b = scan.found; closeScanner(); if (b) openView(b); });
   $('scan-wish').addEventListener('click', async () => {
-    const isbn = scan.isbn;
+    const isbn = scan.isbn, code = scan.code;
     closeScanner();
     viewMode = 'wish';
     renderList();
+    if (!isbn) return openManualForCode(code);
     toast('Cerco il libro…');
     await handleIsbn(isbn);
   });
@@ -2449,7 +2513,10 @@ function init() {
     const row = e.target.closest('.book');
     if (row) pickManualResult(Number(row.dataset.result));
   });
-  $('manual-empty').addEventListener('click', () => { hide('manual'); openBook(viewMode === 'audio' ? { title: $('manual-q').value.trim(), genres: [], list: '', media: ['audio'] } : { title: $('manual-q').value.trim(), genres: [] }); });
+  $('manual-empty').addEventListener('click', () => {
+    hide('manual');
+    if (pendingBarcode) { const code = pendingBarcode; pendingBarcode = ''; return openBook({ title: $('manual-q').value.trim(), genres: [], barcode: code }); }
+    openBook(viewMode === 'audio' ? { title: $('manual-q').value.trim(), genres: [], list: '', media: ['audio'] } : { title: $('manual-q').value.trim(), genres: [] }); });
   $('manual-q').addEventListener('input', () => {
     clearTimeout(manualTimer);
     const text = $('manual-q').value.trim();
@@ -2632,7 +2699,15 @@ function init() {
   document.addEventListener('visibilitychange', () => { if (document.hidden && scan.stream) closeScanner(); });
 }
 
+function openManualForCode(code) {
+  openManual();
+  pendingBarcode = code;
+  $('manual-title').textContent = 'Libro senza ISBN';
+  $('manual-status').textContent = 'Il codice ' + code + ' non è un ISBN: di solito è un volume uscito in edicola o un libro vecchio. Scrivi titolo e autore e scegli il risultato più simile. Il codice resta nella scheda, così la prossima volta lo riconosco.';
+}
+
 function openManual() {
+  pendingBarcode = '';
   $('manual-q').value = '';
   $('manual-results').innerHTML = '';
   $('manual-status').textContent = viewMode === 'audio' ? 'Scrivi il titolo dell\'audiolibro: i risultati arrivano mentre scrivi. Verrà salvato come ascoltato su Audible.' : 'Scrivi le prime lettere del titolo o dell\'autore: i risultati arrivano mentre scrivi.';

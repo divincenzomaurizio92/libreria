@@ -660,3 +660,6 @@ body::before {
 .rail-empty { margin: 0 0 10px; padding: 18px 14px; font-size: 14px; line-height: 1.4; color: var(--muted); border: 1.5px dashed var(--line); border-radius: 10px; }
 .list-sec { margin-bottom: 18px; }
 .list-sec .rail-label, .list > .all-label { margin-top: 14px; }
+
+/* v44 */
+.steps { margin: 0 0 8px; padding-left: 22px; display: grid; gap: 6px; font-size: 15px; }

@@ -1,10 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#7B2D52"/>
-  <g fill="#FFFFFF">
-    <rect x="128" y="120" width="56" height="272" rx="8"/>
-    <rect x="204" y="152" width="44" height="240" rx="8"/>
-    <rect x="268" y="104" width="64" height="288" rx="8"/>
-    <rect x="344" y="168" width="40" height="224" rx="8" transform="rotate(10 364 392)"/>
-    <rect x="104" y="404" width="304" height="18" rx="9"/>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="8%" r="80%">
+      <stop offset="0" stop-color="#5A3D22"/>
+      <stop offset=".45" stop-color="#2E2118"/>
+      <stop offset="1" stop-color="#1A130E"/>
+    </radialGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B08A60"/><stop offset=".25" stop-color="#8A6A48"/><stop offset="1" stop-color="#5E4630"/>
+    </linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".18" stop-color="#fff" stop-opacity=".12"/><stop offset=".4" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <g transform="translate(256 256) scale(0.82) translate(-256 -256)">
+    <!-- dorsi -->
+    <g>
+      <rect x="118" y="150" width="58" height="230" rx="5" fill="#7A2E2B"/>
+      <rect x="118" y="150" width="58" height="230" rx="5" fill="url(#shade)"/>
+      <rect x="128" y="186" width="38" height="3" fill="#E9C76B" opacity=".85"/>
+      <rect x="128" y="334" width="38" height="3" fill="#E9C76B" opacity=".85"/>
+
+      <rect x="184" y="112" width="70" height="268" rx="5" fill="#E2A44B"/>
+      <rect x="184" y="112" width="70" height="268" rx="5" fill="url(#shade)"/>
+      <rect x="196" y="150" width="46" height="4" fill="#2B211A" opacity=".55"/>
+      <rect x="196" y="160" width="46" height="2" fill="#2B211A" opacity=".55"/>
+      <rect x="196" y="332" width="46" height="4" fill="#2B211A" opacity=".55"/>
+
+      <rect x="262" y="168" width="48" height="212" rx="5" fill="#2F5D50"/>
+      <rect x="262" y="168" width="48" height="212" rx="5" fill="url(#shade)"/>
+      <rect x="271" y="200" width="30" height="3" fill="#E9C76B" opacity=".85"/>
+
+      <rect x="318" y="136" width="56" height="244" rx="5" fill="#E9D8A6"/>
+      <rect x="318" y="136" width="56" height="244" rx="5" fill="url(#shade)"/>
+      <rect x="329" y="172" width="34" height="3" fill="#7A2E2B" opacity=".75"/>
+
+      <!-- libro inclinato -->
+      <g transform="rotate(14 438 380)">
+        <rect x="384" y="160" width="54" height="220" rx="5" fill="#3F4A6B"/>
+        <rect x="384" y="160" width="54" height="220" rx="5" fill="url(#shade)"/>
+        <rect x="394" y="196" width="34" height="3" fill="#E9C76B" opacity=".85"/>
+      </g>
+    </g>
+    <!-- mensola -->
+    <rect x="86" y="380" width="340" height="24" rx="5" fill="url(#wood)"/>
+    <rect x="96" y="404" width="320" height="14" rx="4" fill="#000" opacity=".25"/>
   </g>
 </svg>

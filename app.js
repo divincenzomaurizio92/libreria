@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 27;
+const APP_VERSION = 28;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -157,7 +157,8 @@ function fromGoogleItem(item) {
   const img = v.imageLinks || {};
   return {
     isbn: id13 ? id13.identifier : id10 ? toIsbn13(id10.identifier) : '',
-    title: [v.title, v.subtitle].filter(Boolean).join('. '),
+    title: v.title || '',
+    subtitle: v.subtitle || '',
     authors: (v.authors || []).join(', '),
     publisher: v.publisher || '',
     year: yearOf(v.publishedDate),
@@ -196,7 +197,8 @@ async function lookupOpenLibrary(isbn) {
   if (!b) return null;
   return {
     isbn,
-    title: [b.title, b.subtitle].filter(Boolean).join('. '),
+    title: b.title || '',
+    subtitle: b.subtitle || '',
     authors: (b.authors || []).map((a) => a.name).join(', '),
     publisher: (b.publishers || []).map((p) => p.name).join(', '),
     year: yearOf(b.publish_date),
@@ -260,16 +262,16 @@ async function lookupIsbn(isbn) {
   const failed = results.every((r) => r.status === 'rejected');
   const googleDown = results[0].status === 'rejected';
   if (!found.length) return { data: null, failed, googleDown };
-  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '', seriesNum: '', lang: '' };
+  const merged = { isbn, title: '', subtitle: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '', seriesNum: '', lang: '' };
   for (const f of found) {
-    for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover', 'seriesNum', 'lang']) if (!merged[k] && f[k]) merged[k] = f[k];
+    for (const k of ['title', 'subtitle', 'authors', 'publisher', 'year', 'pages', 'cover', 'seriesNum', 'lang']) if (!merged[k] && f[k]) merged[k] = f[k];
     merged.subjects.push(...(f.subjects || []));
     if (!merged.description && f.description) merged.description = f.description;
   }
   merged.publisher = cleanPublisher(fixPublisher(isbn, merged.publisher));
   // Numero del volume scritto nel titolo ("Vol. 2", "Libro 3"), se il catalogo non lo indica.
   if (!merged.seriesNum) {
-    const m = merged.title.match(/\b(?:vol(?:ume)?\.?|libro|parte)\s*(\d{1,3})\b/i);
+    const m = (merged.title + ' ' + merged.subtitle).match(/\b(?:vol(?:ume)?\.?|libro|parte)\s*(\d{1,3})\b/i);
     if (m) merged.seriesNum = m[1];
   }
   if (!merged.authors) merged.authors = guideAuthor(merged);
@@ -703,6 +705,7 @@ function renderList() {
       : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
   }
   visibleIds = books.map((b) => b.id);
+  $('btn-back').hidden = !backTo;
   const showing = total && books.length;
   $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : '');
   // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
@@ -771,6 +774,7 @@ function closePeek() { $('peek').hidden = true; peekId = ''; }
 /* ================= SCHEDA DA LEGGERE ================= */
 
 let viewId = '';
+let backTo = null; // da dove si è partiti toccando un'etichetta: serve al tasto Indietro
 let visibleIds = []; // i libri mostrati nell'elenco, nel loro ordine: serve per passare al successivo
 const itDate = (d) => { const t = new Date(d); return isNaN(t) ? d : t.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' }); };
 
@@ -802,7 +806,7 @@ function renderView(b) {
   // Ogni etichetta porta all'elenco filtrato per quella voce. Nei desideri è attiva solo la lista.
   const tags = [...(b.list ? [[b.list, 'list:' + b.list]] : []),
     ...(b.genres || []).map((g) => [g, b.list ? '' : 'genre:' + g]),
-    ...ownersOf(b).map((o) => ['Di ' + o, b.list ? '' : 'owner:' + o]),
+    ...ownersOf(b).map((o) => [o, b.list ? '' : 'owner:' + o]),
     ...(b.shelf ? [[b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : ''), b.list ? '' : 'place:' + b.shelf]] : [])];
   const facts = [
     ['Letto nel', b.status === 'read' && b.readAt ? showRead(b.readAt) : ''],
@@ -820,6 +824,7 @@ function renderView(b) {
         ${coverHtml(b, true)}
         <div class="hero-text">
           <h2>${esc(b.title || 'Senza titolo')}</h2>
+          ${b.subtitle ? `<span class="hero-sub">${esc(b.subtitle)}</span>` : ''}
           ${b.authors ? `<span class="hero-author">${esc(b.authors)}</span>` : ''}
           ${b.rating ? `<span class="hero-stars" role="img" aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
         </div>
@@ -844,7 +849,7 @@ function renderView(b) {
 
 let current = null; // { book, isNew, selected:Set }
 
-const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
+const FIELDS = ['title', 'subtitle', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
@@ -1058,7 +1063,7 @@ async function refillFromCatalogs() {
   const { data, failed } = await lookupIsbn(isbn);
   if (!data) return toast(failed ? 'Cataloghi non raggiungibili: controlla la connessione.' : 'Nessun dato trovato per questo ISBN.');
   let filled = 0;
-  for (const k of ['title', 'authors', 'publisher', 'pages', 'year']) {
+  for (const k of ['title', 'subtitle', 'authors', 'publisher', 'pages', 'year']) {
     if (!$('f-' + k).value.trim() && data[k]) { $('f-' + k).value = data[k]; filled++; }
   }
   if (!$('f-plot').value.trim() && data.description) { $('f-plot').value = data.description; filled++; }
@@ -1345,7 +1350,7 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['subtitle', 'Sottotitolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
   const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : c[0] === 'status' ? (STATUS[b.status] || '') : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
@@ -1536,8 +1541,8 @@ function init() {
     renderList();
     hide('filter-sheet');
   });
-  $('tab-library').addEventListener('click', () => { viewMode = 'library'; renderList(); });
-  $('tab-wish').addEventListener('click', () => { viewMode = 'wish'; renderList(); });
+  $('tab-library').addEventListener('click', () => { backTo = null; viewMode = 'library'; renderList(); });
+  $('tab-wish').addEventListener('click', () => { backTo = null; viewMode = 'wish'; renderList(); });
   const closeViewMenu = () => { $('view-menu').hidden = true; $('view-cycle').setAttribute('aria-expanded', 'false'); };
   $('view-cycle').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1558,6 +1563,7 @@ function init() {
   // Home: si torna sempre al punto zero, cioè tutte le copertine della libreria, senza filtri.
   $('btn-home').addEventListener('click', () => {
     for (const id of ['view', 'book', 'settings', 'manual', 'filter-sheet', 'arrange']) hide(id);
+    backTo = null;
     closePeek();
     viewMode = 'library';
     viewKind = 'grid';
@@ -1664,6 +1670,8 @@ function init() {
     const go = e.target.closest('[data-goto]');
     if (go) {
       const target = go.dataset.goto;
+      // Si ricorda il libro e l'elenco di partenza, per poterci tornare con Indietro.
+      if (!backTo) backTo = { id: viewId, viewMode, filterGenre, filterList };
       hide('view');
       $('search').value = '';
       if (target.startsWith('list:')) { viewMode = 'wish'; filterList = target.slice(5); }
@@ -1756,6 +1764,15 @@ function init() {
     const row = e.target.closest('[data-id]');
     const book = row && state.books.find((b) => b.id === row.dataset.id);
     closePeek();
+    if (book) openView(book);
+  });
+  $('btn-back').addEventListener('click', () => {
+    const from = backTo;
+    backTo = null;
+    if (!from) return;
+    viewMode = from.viewMode; filterGenre = from.filterGenre; filterList = from.filterList;
+    renderList();
+    const book = state.books.find((b) => b.id === from.id);
     if (book) openView(book);
   });
 

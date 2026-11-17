@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 34;
+const APP_VERSION = 35;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -51,6 +51,16 @@ function loadState() {
       state.places = Array.isArray(data.places) ? data.places : [];
       // Le posizioni scritte a mano nelle versioni precedenti diventano mobili.
       for (const b of state.books) if (b.shelf && !state.places.includes(b.shelf)) state.places.push(b.shelf);
+      // Una volta sola: gli editori salvati dalle prime versioni perdono "Editore", "Edizioni" e simili.
+      if (!localStorage.getItem('libreria.pubClean')) {
+        let changed = false;
+        for (const b of state.books) {
+          const clean = cleanPublisher(b.publisher);
+          if (b.publisher && clean !== b.publisher) { b.publisher = clean; changed = true; }
+        }
+        if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem('libreria.pubClean', '1');
+      }
     }
   } catch (e) {
     console.warn('Lettura dei dati non riuscita', e);
@@ -163,7 +173,7 @@ function fromGoogleItem(item) {
     publisher: v.publisher || '',
     year: yearOf(v.publishedDate),
     pages: v.pageCount ? String(v.pageCount) : '',
-    cover: httpsUrl(img.thumbnail || img.smallThumbnail),
+    cover: httpsUrl(img.medium || img.small || img.thumbnail || img.smallThumbnail),
     subjects: v.categories || [],
     description: String(v.description || '').replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n\n').trim(),
     lang: v.language || '',
@@ -477,7 +487,13 @@ function tintBook(color) {
 
 /* ================= 5. ELENCO DEI LIBRI ================= */
 
-let filterGenre = '';
+let filterGenre = ''; // uno o più filtri uniti da "|", al massimo uno per tipo: "owner:Elena|genre:Giallo"
+const filterParts = () => (filterGenre ? filterGenre.split('|') : []);
+const filterKind = (v) => (v === 'loan' ? 'loan' : v.slice(0, v.indexOf(':')));
+function toggleFilter(v) {
+  const parts = filterParts();
+  filterGenre = (parts.includes(v) ? parts.filter((p) => p !== v) : [...parts.filter((p) => filterKind(p) !== filterKind(v)), v]).join('|');
+}
 let viewMode = 'library'; // 'library' = libri posseduti, 'wish' = liste desideri
 let filterList = '';
 
@@ -583,10 +599,12 @@ function renderFilterSheet() {
     const shown = items.filter(([, label]) => !q || label.toLowerCase().includes(q));
     if (!shown.length) return '';
     return `<p class="view-label">${title}</p><div class="chips">${shown.map(([v, label, n]) =>
-      `<button class="chip${filterGenre === v ? ' on' : ''}" data-filter="${esc(v)}">${esc(label)} <small>${n}</small></button>`).join('')}</div>`;
+      `<button class="chip${filterParts().includes(v) ? ' on' : ''}" data-filter="${esc(v)}" aria-pressed="${filterParts().includes(v)}">${esc(label)} <small>${n}</small></button>`).join('')}</div>`;
   }).join('');
   $('filter-body').innerHTML = html || '<p class="hint">Nessuna voce con questo nome.</p>';
   $('filter-clear').hidden = !filterGenre;
+  const n = state.books.filter((b) => !b.list && matchesFilter(b)).length;
+  $('filter-done').textContent = filterGenre ? (n === 1 ? 'Vedi 1 libro' : 'Vedi ' + n + ' libri') : 'Vedi tutti i libri';
 }
 
 /* Suggerimento di disposizione: solo gruppi che stanno bene insieme, in ordine di precedenza.
@@ -634,14 +652,14 @@ function renderArrange() {
   </section>`).join('') || '<p class="hint">Aggiungete qualche libro per vedere i suggerimenti.</p>';
 }
 
-function matchesFilter(b) {
-  if (!filterGenre) return true;
-  if (filterGenre === 'loan') return Boolean(b.loanTo);
-  if (filterGenre.startsWith('owner:')) return ownersOf(b).includes(filterGenre.slice(6));
-  if (filterGenre.startsWith('status:')) return (b.status || '') === filterGenre.slice(7);
-  if (filterGenre.startsWith('place:')) return b.shelf === filterGenre.slice(6);
-  return (b.genres || []).includes(filterGenre.slice(6));
+function matchesOne(b, f) {
+  if (f === 'loan') return Boolean(b.loanTo);
+  if (f.startsWith('owner:')) return ownersOf(b).includes(f.slice(6));
+  if (f.startsWith('status:')) return (b.status || '') === f.slice(7);
+  if (f.startsWith('place:')) return b.shelf === f.slice(6);
+  return (b.genres || []).includes(f.slice(6));
 }
+function matchesFilter(b) { return filterParts().every((f) => matchesOne(b, f)); }
 
 function renderList() {
   const q = $('search').value.trim().toLowerCase();
@@ -695,19 +713,22 @@ function renderList() {
     // Un filtro alla volta: prestiti, proprietario oppure genere.
     const loans = owned.filter((b) => b.loanTo).length;
     const people = state.owners.filter((o) => owned.some((b) => ownersOf(b).includes(o)));
-    const count = (test) => owned.filter(test).length;
+    // Ogni numero tiene conto dei filtri già scelti negli altri gruppi: con «Elena» acceso, i generi contano solo i suoi libri.
+    const parts = filterParts();
+    const count = (test, kind) => owned.filter((b) => parts.every((p) => filterKind(p) === kind || matchesOne(b, p)) && test(b)).length;
     const rooms = state.places.filter((p) => owned.some((b) => b.shelf === p));
     // Le scelte stanno in un pannello a parte, divise per gruppo e con ricerca: reggono anche decine di generi.
     filterGroups = [
-      ['Lettura', Object.keys(STATUS).map((k) => ['status:' + k, k === 'read' ? 'Letti' : STATUS[k], count((b) => b.status === k)]).filter((x) => x[2])],
-      ['Prestiti', loans ? [['loan', 'In prestito', loans]] : []],
-      ['Di chi è', people.map((o) => ['owner:' + o, o, count((b) => ownersOf(b).includes(o))])],
-      ['Dove sta', rooms.map((p) => ['place:' + p, p, count((b) => b.shelf === p)])],
-      ['Genere', used.map((g) => ['genre:' + g, g, count((b) => (b.genres || []).includes(g))])],
-    ].filter(([, items]) => items.length);
+      ['Lettura', Object.keys(STATUS).map((k) => ['status:' + k, k === 'read' ? 'Letti' : STATUS[k], count((b) => b.status === k, 'status')])],
+      ['Prestiti', loans ? [['loan', 'In prestito', count((b) => Boolean(b.loanTo), 'loan')]] : []],
+      ['Di chi è', people.map((o) => ['owner:' + o, o, count((b) => ownersOf(b).includes(o), 'owner')])],
+      ['Dove sta', rooms.map((p) => ['place:' + p, p, count((b) => b.shelf === p, 'place')])],
+      ['Genere', used.map((g) => ['genre:' + g, g, count((b) => (b.genres || []).includes(g), 'genre')])],
+    ].map(([title, items]) => [title, items.filter(([v, , n]) => n || parts.includes(v))]).filter(([, items]) => items.length);
     const all = filterGroups.flatMap(([, items]) => items);
-    const active = all.find(([v]) => v === filterGenre);
-    if (!active) filterGenre = '';
+    const chosen = all.filter(([v]) => parts.includes(v));
+    if (chosen.length !== parts.length) filterGenre = chosen.map(([v]) => v).join('|');
+    const active = chosen.length ? [filterGenre, chosen.map(([, label]) => label).join(' · ')] : null;
     $('filters').innerHTML = all.length
       // Con un filtro attivo, il pulsante Filtra prende il suo nome: un solo elemento, con la ✕ per toglierlo.
       ? (active
@@ -718,9 +739,9 @@ function renderList() {
 
   if (!total) {
     $('list').innerHTML = wish
-      ? `<div class="empty"><strong>Nessun desiderio</strong>Scansiona un libro in negozio, oppure aggiungilo a mano: finirà nella lista che scegli.</div>`
+      ? `<div class="empty"><strong>Nessun desiderio</strong>Scansiona un libro in negozio, oppure aggiungilo con la penna: finirà nella lista che scegli.</div>`
       : `<div class="empty"><strong>La libreria è vuota</strong>
-      Tocca «Scansiona un libro» e inquadra il codice a barre sul retro della copertina.</div>`;
+      Tocca il pulsante con il codice a barre, in basso a destra, e inquadra il retro del libro.</div>`;
   } else if (!books.length) {
     $('list').innerHTML = '<div class="empty"><strong>Nessun libro trovato</strong>Prova a cambiare ricerca o filtro.</div>';
   } else {
@@ -854,6 +875,7 @@ function renderView(b) {
     ['In lettura da', b.status === 'reading' && b.startedAt ? new Date(b.startedAt).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : ''],
     ['Casa editrice', b.publisher], ['Anno di questa edizione', b.year], ['Pagine', b.pages],
     ['Serie', b.series ? b.series + (b.seriesNum ? ', n. ' + b.seriesNum : '') : ''],
+    ['Formato', b.format],
     ['Comprato il', b.boughtAt ? itDate(b.boughtAt) : ''], [b.list ? 'Prezzo di copertina' : 'Prezzo pagato', Number(b.price) > 0 ? euro(b.price) : ''],
     ['Lingua', LANGS[b.lang] || ''],
     ['ISBN', b.isbn],
@@ -890,7 +912,7 @@ function renderView(b) {
 
 let current = null; // { book, isNew, selected:Set }
 
-const FIELDS = ['title', 'subtitle', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
+const FIELDS = ['title', 'subtitle', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'format', 'boughtAt', 'price', 'loanTo', 'loanDate'];
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
@@ -1063,6 +1085,7 @@ function saveBook() {
   renderList();
   refreshColors();
   if (!$('view').hidden) renderView(b);
+  if (!$('batch').hidden) renderBatch();
   toast(b.list ? 'Salvato in «' + b.list + '»' : current.isNew ? 'Aggiunto in libreria' : 'Salvato', null, null, b.cover);
   return true;
 }
@@ -1212,7 +1235,7 @@ async function readFrame(source, w, h) {
 }
 
 async function openScanner(mode) {
-  setScanMode(mode === 'check' ? 'check' : 'add');
+  setScanMode(mode === 'check' || mode === 'batch' ? mode : 'add');
   show('scanner');
   setScanStatus('Avvio la fotocamera…');
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1260,6 +1283,7 @@ async function onCode(text) {
     return;
   }
   if (scan.mode === 'check') return showCheckResult(isbn);
+  if (scan.mode === 'batch') return batchCode(isbn);
   stopCamera();
   if (navigator.vibrate) navigator.vibrate(60);
   setScanStatus('Trovato ' + isbn + '. Cerco il libro…');
@@ -1274,7 +1298,150 @@ function setScanMode(mode) {
   hide('scan-result');
   $('scan-mode-add').classList.toggle('on', mode === 'add');
   $('scan-mode-check').classList.toggle('on', mode === 'check');
-  if (scan.stream) setScanStatus(mode === 'check' ? 'Inquadra il codice per sapere se il libro è già vostro' : 'Inquadra il codice a barre sul retro del libro');
+  $('scan-mode-batch').classList.toggle('on', mode === 'batch');
+  renderBatchBar();
+  if (scan.stream) setScanStatus(mode === 'check' ? 'Inquadra il codice per sapere se il libro è già vostro'
+    : mode === 'batch' ? 'Inquadra un libro dopo l\'altro: li salvo da solo' : 'Inquadra il codice a barre sul retro del libro');
+}
+
+/* ---------- Scansione a raffica ----------
+   Un codice dopo l'altro, senza aprire la scheda: il libro viene cercato e salvato da solo
+   mentre si inquadra già il successivo. Alla fine un riepilogo mostra cosa è entrato e cosa
+   va completato, e permette di dare a tutti in un colpo la persona, il mobile e lo stato di lettura. */
+let batch = { seen: new Set(), items: [], running: false };
+
+function beep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    batch.audio = batch.audio || new Ctx();
+    const o = batch.audio.createOscillator(), g = batch.audio.createGain();
+    o.frequency.value = 880; g.gain.value = 0.08;
+    o.connect(g); g.connect(batch.audio.destination);
+    o.start(); o.stop(batch.audio.currentTime + 0.09);
+  } catch (e) { /* senza suono resta il lampo verde */ }
+}
+
+function flashFrame(kind) {
+  const f = document.querySelector('.scan-frame');
+  f.classList.remove('hit', 'dup');
+  void f.offsetWidth;
+  f.classList.add(kind);
+  setTimeout(() => f.classList.remove(kind), 600);
+}
+
+function batchCode(isbn) {
+  if (batch.seen.has(isbn)) return; // il codice resta inquadrato per qualche istante: si conta una volta sola
+  batch.seen.add(isbn);
+  const dup = state.books.find((b) => b.isbn === isbn);
+  if (dup) {
+    if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
+    flashFrame('dup');
+    setScanStatus((dup.list ? 'Già tra i desideri: ' : 'Già in libreria: ') + '«' + (dup.title || isbn) + '»');
+    return;
+  }
+  if (navigator.vibrate) navigator.vibrate(60);
+  beep();
+  flashFrame('hit');
+  batch.items.push({ isbn, state: 'wait', id: '' });
+  setScanStatus('Preso. Avanti il prossimo');
+  renderBatchBar();
+  runBatch();
+}
+
+async function batchLookup(item) {
+  let found = null, failed = false;
+  try { const r = await lookupIsbn(item.isbn); found = r.data; failed = Boolean(r.failed || (r.googleDown && !r.data)); } catch (e) { failed = true; }
+  let b = item.id ? state.books.find((x) => x.id === item.id) : null;
+  if (!b) {
+    if (state.books.some((x) => x.isbn === item.isbn)) { item.state = 'ok'; return; }
+    b = { id: newId(), addedAt: Date.now(), isbn: item.isbn, title: '', genres: [], owners: [], list: '', status: '' };
+    state.books.push(b);
+    item.id = b.id;
+  }
+  if (found) {
+    if (!found.cover) found.cover = await probeCover(item.isbn);
+    const s = suggestGenres(found.subjects, found.authors, found.description);
+    for (const k of ['title', 'subtitle', 'authors', 'publisher', 'year', 'pages', 'cover', 'seriesNum', 'lang']) if (!b[k] && found[k]) b[k] = found[k];
+    if (!b.plot) b.plot = found.description || '';
+    b.plotTried = true;
+    if (!(b.genres || []).length) b.genres = s.genres.filter((g) => state.genres.includes(g));
+  }
+  b.updatedAt = Date.now();
+  item.state = found ? 'ok' : failed ? 'failed' : 'notfound';
+  saveState();
+}
+
+async function runBatch() {
+  if (batch.running) return;
+  batch.running = true;
+  try {
+    let item;
+    while ((item = batch.items.find((x) => x.state === 'wait'))) {
+      await batchLookup(item);
+      const b = state.books.find((x) => x.id === item.id);
+      if (scan.mode === 'batch' && !$('scanner').hidden && b) setScanStatus(item.state === 'ok' ? '✓ ' + (b.title || item.isbn) : 'Non trovato: lo completi alla fine');
+      renderBatchBar();
+      if (!$('batch').hidden) renderBatch();
+    }
+  } finally { batch.running = false; }
+  renderList();
+  refreshColors();
+}
+
+const batchBooks = () => batch.items.map((it) => [it, state.books.find((b) => b.id === it.id)]).filter(([it, b]) => b || it.state === 'wait');
+
+function renderBatchBar() {
+  const on = scan.mode === 'batch';
+  $('scan-batch-bar').hidden = !on;
+  if (!on) return;
+  const n = batch.items.length, wait = batch.items.filter((x) => x.state === 'wait').length;
+  $('scan-batch-count').textContent = (n === 1 ? '1 libro' : n + ' libri') + (wait ? ' · ' + wait + ' in ricerca' : '');
+  $('scan-batch-done').disabled = !n;
+}
+
+function renderBatch() {
+  const rows = batchBooks();
+  const books = rows.map(([, b]) => b).filter(Boolean);
+  const wait = rows.filter(([it]) => it.state === 'wait').length;
+  const todo = rows.filter(([it, b]) => b && (it.state !== 'ok' || isIncomplete(b)));
+  const offline = rows.filter(([it]) => it.state === 'failed').length;
+  $('batch-title').textContent = books.length === 1 ? '1 libro aggiunto' : books.length + ' libri aggiunti';
+  $('batch-info').textContent = wait ? 'Sto ancora cercando ' + (wait === 1 ? '1 libro' : wait + ' libri') + '…'
+    : todo.length ? (todo.length === 1 ? '1 libro ha' : todo.length + ' libri hanno') + ' dati da completare: sono in cima, toccali per sistemarli.'
+    : books.length ? 'Tutti completi. Tocca un libro se vuoi controllarlo.' : 'Nessun libro in questa raffica.';
+  $('batch-retry').hidden = !offline || wait > 0;
+  const all = (test) => books.length > 0 && books.every(test);
+  $('batch-owners').innerHTML = state.owners.map((o) => `<button type="button" class="chip${all((b) => ownersOf(b).includes(o)) ? ' on' : ''}" data-owner="${esc(o)}">${esc(o)}</button>`).join('');
+  $('batch-places').innerHTML = state.places.length
+    ? state.places.map((p) => `<button type="button" class="chip${all((b) => b.shelf === p) ? ' on' : ''}" data-place="${esc(p)}">${esc(p)}</button>`).join('')
+    : '<p class="hint">Nessun mobile ancora: si creano dalle Impostazioni o dalla scheda di un libro.</p>';
+  $('batch-status').innerHTML = Object.keys(STATUS).filter((k) => k !== 'reading').map((k) => `<button type="button" data-status="${k}" class="${all((b) => b.status === k) ? 'on' : ''}">${STATUS[k]}</button>`).join('');
+  $('batch-apply').hidden = !books.length;
+  const order = (r) => (r[0].state === 'wait' ? 2 : r[1] && (r[0].state !== 'ok' || isIncomplete(r[1])) ? 0 : 1);
+  $('batch-list').innerHTML = [...rows].sort((a, b) => order(a) - order(b)).map(([it, b]) => (b
+    ? bookRowHtml(it.state === 'ok' ? b : { ...b, title: b.title || (it.state === 'failed' ? 'Non cercato: mancava la connessione' : 'Non trovato nei cataloghi'), authors: b.authors || 'ISBN ' + it.isbn }, `data-id="${esc(b.id)}"`)
+    : `<div class="book"><div class="cover">…</div><span class="book-info"><span class="book-title">Sto cercando…</span><span class="book-author">ISBN ${esc(it.isbn)}</span></span></div>`)).join('');
+}
+
+function openBatch() {
+  stopCamera();
+  hide('scanner');
+  renderBatch();
+  show('batch');
+}
+
+function closeBatch() {
+  hide('batch');
+  if (!batch.items.some((x) => x.state === 'wait')) batch = { seen: new Set(), items: [], running: false, audio: batch.audio };
+  renderList();
+}
+
+function batchApply(change) {
+  for (const [, b] of batchBooks()) if (b) { change(b); b.updatedAt = Date.now(); }
+  saveState();
+  renderBatch();
+  renderList();
 }
 
 function showCheckResult(isbn) {
@@ -1299,7 +1466,11 @@ function stopCamera() {
   $('video').srcObject = null;
 }
 
-function closeScanner() { stopCamera(); hide('scan-result'); hide('scanner'); }
+function closeScanner() {
+  // Uscendo da una raffica con dei libri presi si passa dal riepilogo, così non resta nulla in sospeso.
+  if (scan.mode === 'batch' && batch.items.length) return openBatch();
+  stopCamera(); hide('scan-result'); hide('scanner');
+}
 const setScanStatus = (t) => { $('scan-status').textContent = t; };
 
 async function toggleTorch() {
@@ -1391,7 +1562,7 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['subtitle', 'Sottotitolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['subtitle', 'Sottotitolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['format', 'Formato'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
   const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : c[0] === 'status' ? (STATUS[b.status] || '') : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
@@ -1437,6 +1608,13 @@ function renderSettings() {
       <button class="btn ghost" data-place-del="${i}" ${used ? 'disabled' : ''} aria-label="Elimina ${esc(p)}">${used ? used + (used === 1 ? ' libro' : ' libri') : 'Elimina'}</button>
     </div>`;
   }).join('');
+  $('owner-list').innerHTML = state.owners.map((o, i) => {
+    const used = state.books.filter((b) => ownersOf(b).includes(o)).length;
+    return `<div class="genre-item">
+      <input type="text" id="owner-${i}" value="${esc(o)}" data-owner-index="${i}" aria-label="Nome della persona">
+      <button class="btn ghost" data-owner-del="${i}" ${used ? 'disabled' : ''} aria-label="Elimina ${esc(o)}">${used ? used + (used === 1 ? ' libro' : ' libri') : 'Elimina'}</button>
+    </div>`;
+  }).join('');
   $('wish-list').innerHTML = state.wishlists.map((l, i) => {
     const used = state.books.filter((b) => b.list === l).length;
     return `<div class="genre-item">
@@ -1461,10 +1639,64 @@ function renamePlace(i, name) {
   const target = clash >= 0 ? state.places[clash] : name;
   for (const b of state.books) if (b.shelf === old) b.shelf = target;
   if (clash >= 0) state.places.splice(i, 1); else state.places[i] = name;
+  filterGenre = filterParts().map((p) => (p === 'place:' + old ? 'place:' + target : p)).join('|');
   saveState();
   renderSettings();
   renderList();
   toast(clash >= 0 ? '«' + old + '» unito a «' + target + '».' : 'Mobile rinominato.');
+}
+
+function renameOwner(i, name) {
+  const old = state.owners[i];
+  name = name.trim().replace(/\s+/g, ' ');
+  if (!name || name === old) return renderSettings();
+  const clash = state.owners.findIndex((o, j) => j !== i && o.toLowerCase() === name.toLowerCase());
+  const target = clash >= 0 ? state.owners[clash] : name;
+  for (const b of state.books) {
+    if (ownersOf(b).includes(old)) { b.owners = [...new Set(ownersOf(b).map((o) => (o === old ? target : o)))]; delete b.owner; }
+  }
+  if (clash >= 0) state.owners.splice(i, 1); else state.owners[i] = name;
+  filterGenre = filterParts().map((p) => (p === 'owner:' + old ? 'owner:' + target : p)).join('|');
+  saveState();
+  renderSettings();
+  renderList();
+  toast(clash >= 0 ? '«' + old + '» unito a «' + target + '».' : 'Nome cambiato.');
+}
+
+function addSettingsOwner() {
+  const name = $('owner-new').value.trim().replace(/\s+/g, ' ');
+  if (!name) return;
+  if (!state.owners.some((o) => o.toLowerCase() === name.toLowerCase())) { state.owners.push(name); saveState(); }
+  $('owner-new').value = '';
+  renderSettings();
+}
+
+/* Le copertine salvate dalle prime versioni sono piccole: si chiede a Google la stessa immagine più grande.
+   La copertina resta quella, cambia solo la nitidezza. Se Google non ne ha una più grande, non si tocca nulla. */
+async function sharpenCovers() {
+  const todo = state.books.filter((b) => /books\.google\.[a-z.]+\/books\/content/.test(b.cover || '') && /[?&]zoom=1\b/.test(b.cover));
+  if (!todo.length) return toast('Le copertine sono già alla grandezza migliore.');
+  const btn = $('covers-sharpen');
+  btn.disabled = true;
+  let done = 0, failed = 0;
+  const key = googleKey();
+  for (const [i, b] of todo.entries()) {
+    btn.textContent = 'Copertina ' + (i + 1) + ' di ' + todo.length + '…';
+    const id = (b.cover.match(/[?&]id=([^&]+)/) || [])[1];
+    if (!id) continue;
+    try {
+      const full = await getJson('https://www.googleapis.com/books/v1/volumes/' + encodeURIComponent(id) + '?country=IT' + (key ? '&key=' + encodeURIComponent(key) : ''));
+      const img = (full && full.volumeInfo && full.volumeInfo.imageLinks) || {};
+      const better = httpsUrl(img.medium || img.small || '');
+      if (better && better !== b.cover) { b.cover = better; done++; }
+    } catch (e) { failed++; }
+  }
+  btn.disabled = false;
+  btn.textContent = 'Rendi più nitide le copertine';
+  if (done) { saveState(); renderList(); }
+  toast(failed === todo.length ? 'Google non ha risposto: riprova più tardi.'
+    : done ? (done === 1 ? '1 copertina migliorata.' : done + ' copertine migliorate.') + (done < todo.length ? ' Per le altre Google non ha un\'immagine più grande.' : '')
+    : 'Per queste copertine Google non ha un\'immagine più grande.');
 }
 
 function renameWishlist(i, name) {
@@ -1508,7 +1740,7 @@ function renameGenre(i, name) {
     if ((b.genres || []).includes(old)) b.genres = [...new Set(b.genres.map((g) => (g === old ? target : g)))];
   }
   if (clash >= 0) state.genres.splice(i, 1); else state.genres[i] = name;
-  if (filterGenre === 'genre:' + old) filterGenre = 'genre:' + target;
+  filterGenre = filterParts().map((p) => (p === 'genre:' + old ? 'genre:' + target : p)).join('|');
   saveState();
   renderSettings();
   renderList();
@@ -1540,7 +1772,7 @@ function hide(id) { $(id).hidden = true; scheduleBackSync(); }
    Il gesto o il tasto indietro chiude prima ciò che è aperto sopra l'elenco (anteprima, scheda,
    modulo, scanner…), poi l'elenco filtrato da un'etichetta, e solo alla fine esce dall'app.
    Si ottiene tenendo nella cronologia del browser una voce "di guardia" finché qualcosa è aperto. */
-const LAYERS = ['book', 'view', 'settings', 'manual', 'scanner', 'arrange', 'filter-sheet'];
+const LAYERS = ['book', 'view', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
 let backGuard = false;
 let backPending = false;
 let backQueued = false;
@@ -1627,10 +1859,12 @@ function init() {
   $('filter-body').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-filter]');
     if (!chip) return;
-    filterGenre = filterGenre === chip.dataset.filter ? '' : chip.dataset.filter;
+    // Il pannello resta aperto: si possono accendere più filtri, uno per gruppo (es. Elena + Giallo).
+    toggleFilter(chip.dataset.filter);
     renderList();
-    hide('filter-sheet');
+    renderFilterSheet();
   });
+  $('filter-done').addEventListener('click', () => { hide('filter-sheet'); window.scrollTo(0, 0); });
   $('tab-library').addEventListener('click', () => { backTo = null; viewMode = 'library'; renderList(); });
   $('tab-wish').addEventListener('click', () => { backTo = null; viewMode = 'wish'; renderList(); });
   const closeViewMenu = () => { $('view-menu').hidden = true; $('view-cycle').setAttribute('aria-expanded', 'false'); };
@@ -1845,6 +2079,17 @@ function init() {
   });
   const addSettingsPlace = () => { if (addPlace($('place-new').value)) { $('place-new').value = ''; renderSettings(); } };
   $('place-add').addEventListener('click', addSettingsPlace);
+  $('owner-list').addEventListener('change', (e) => { if (e.target.dataset.ownerIndex !== undefined) renameOwner(Number(e.target.dataset.ownerIndex), e.target.value); });
+  $('owner-list').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-owner-del]');
+    if (!del || del.disabled) return;
+    state.owners.splice(Number(del.dataset.ownerDel), 1);
+    saveState();
+    renderSettings();
+    renderList();
+  });
+  $('owner-add').addEventListener('click', addSettingsOwner);
+  $('covers-sharpen').addEventListener('click', sharpenCovers);
   $('place-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') addSettingsPlace(); });
   $('shelf-sort').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-sort]');
@@ -1929,6 +2174,38 @@ function init() {
   $('scan-close').addEventListener('click', closeScanner);
   $('scan-mode-add').addEventListener('click', () => setScanMode('add'));
   $('scan-mode-check').addEventListener('click', () => setScanMode('check'));
+  $('scan-mode-batch').addEventListener('click', () => { setScanMode('batch'); beep(); });
+  $('scan-batch-done').addEventListener('click', openBatch);
+  $('batch-close').addEventListener('click', closeBatch);
+  $('batch-more').addEventListener('click', () => { hide('batch'); openScanner('batch'); });
+  $('batch-retry').addEventListener('click', () => {
+    for (const it of batch.items) if (it.state === 'failed') it.state = 'wait';
+    renderBatch();
+    runBatch();
+  });
+  $('batch-owners').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-owner]');
+    if (!chip) return;
+    const o = chip.dataset.owner, off = chip.classList.contains('on');
+    batchApply((b) => { const set = new Set(ownersOf(b)); if (off) set.delete(o); else set.add(o); b.owners = state.owners.filter((x) => set.has(x)); delete b.owner; });
+  });
+  $('batch-places').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-place]');
+    if (!chip) return;
+    const p = chip.classList.contains('on') ? '' : chip.dataset.place;
+    batchApply((b) => { b.shelf = p; if (!p) b.shelfRow = ''; });
+  });
+  $('batch-status').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-status]');
+    if (!btn) return;
+    const s = btn.classList.contains('on') ? '' : btn.dataset.status;
+    batchApply((b) => setStatus(b, s));
+  });
+  $('batch-list').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-id]');
+    const b = row && state.books.find((x) => x.id === row.dataset.id);
+    if (b) openBook(b);
+  });
   $('scan-again').addEventListener('click', () => setScanMode('check'));
   $('scan-open').addEventListener('click', () => { const b = scan.found; closeScanner(); if (b) openView(b); });
   $('scan-wish').addEventListener('click', async () => {

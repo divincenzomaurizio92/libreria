@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 29;
+const APP_VERSION = 30;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -687,8 +687,10 @@ function renderList() {
     const active = all.find(([v]) => v === filterGenre);
     if (!active) filterGenre = '';
     $('filters').innerHTML = all.length
-      ? `<button class="chip" data-open-filters><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filtra</button>`
-        + (active ? `<button class="chip on" data-genre="" aria-label="Togli il filtro ${esc(active[1])}">${esc(active[1])} ✕</button>` : '')
+      // Con un filtro attivo, il pulsante Filtra prende il suo nome: un solo elemento, con la ✕ per toglierlo.
+      ? (active
+        ? `<span class="chip-pair"><button class="chip on" data-open-filters aria-label="Filtro attivo: ${esc(active[1])}. Tocca per cambiarlo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span class="lbl">${esc(active[1])}</span></button><button class="chip on" data-genre="" aria-label="Togli il filtro ${esc(active[1])}">✕</button></span>`
+        : `<button class="chip" data-open-filters><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filtra</button>`)
       : '';
   }
 

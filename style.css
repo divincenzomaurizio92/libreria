@@ -460,3 +460,12 @@ button.tag:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px
 .hero-sub { font: 500 17px/1.25 var(--font-display); color: var(--ink); opacity: .85; overflow-wrap: anywhere; }
 #btn-back { flex: 0 0 auto; display: inline-flex; align-items: center; padding: 0 12px 0 8px; }
 #btn-back svg { margin-right: 2px; }
+
+/* ---------- Riga dei filtri: niente si sovrappone ---------- */
+#btn-back { width: 42px; padding: 0; justify-content: center; }
+#btn-back svg { margin: 0; width: 20px; height: 20px; }
+.chip-pair { display: flex; min-width: 0; max-width: 100%; }
+.chip-pair .chip:first-child { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; border-radius: 999px 0 0 999px; padding-right: 8px; }
+.chip-pair .chip:last-child { flex: 0 0 auto; border-radius: 0 999px 999px 0; padding: 0 14px 0 10px; border-left: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent); }
+.chip-pair .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chip-pair svg { flex: 0 0 auto; }

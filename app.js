@@ -1485,7 +1485,7 @@ async function scanTick() {
 /* Codici che non sono ISBN ma stanno sui libri: 977 dei volumi da edicola, codici interni dei libri vecchi.
    Non si trovano nei cataloghi, ma si tengono nella scheda: così «Ce l'ho già?» li riconosce la volta dopo. */
 let pendingBarcode = '';
-const otherCode = (text) => { const c = String(text || '').replace(/\D/g, ''); return /^\d{8,14}$/.test(c) ? c : ''; };
+const otherCode = (text) => { const c = String(text || '').replace(/\D/g, ''); return /^\d{6,14}$/.test(c) ? c : ''; };
 const byBarcode = (code) => state.books.find((b) => b.barcode === code);
 
 async function onCode(text) {

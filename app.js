@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -558,6 +558,51 @@ function renderFilterSheet() {
   $('filter-clear').hidden = !filterGenre;
 }
 
+/* Suggerimento di disposizione: solo gruppi che stanno bene insieme, in ordine di precedenza.
+   Regole scelte dalla famiglia: i libri di Tommaso in un posto loro; i ricettari in cucina;
+   i "da leggere" a portata di mano; serie numerate e guide di viaggio sempre unite;
+   per tutto il resto vince il genere e, dentro il genere, le collane stanno vicine. */
+function arrangeGroups() {
+  const rest = new Set(state.books.filter((b) => !b.list));
+  const groups = [];
+  const text = (v) => String(v || '');
+  const cmp = (...keys) => (a, b) => { for (const k of keys) { const r = text(a[k]).localeCompare(text(b[k]), 'it', { numeric: true, sensitivity: 'base' }); if (r) return r; } return 0; };
+  const take = (title, hint, test, sort) => {
+    const items = [...rest].filter(test);
+    if (!items.length) return;
+    items.forEach((b) => rest.delete(b));
+    groups.push({ title, hint: typeof hint === 'function' ? hint(items) : hint, items: items.sort(sort) });
+  };
+  take('Libri di Tommaso', 'Un posto tutto loro, in basso, alla sua altezza.', (b) => ownersOf(b).length === 1 && ownersOf(b)[0] === 'Tommaso', cmp('title'));
+  take('Ricettari', 'Restano in cucina.', (b) => (b.genres || []).includes('Cucina'), cmp('authors', 'title'));
+  take('Da leggere', 'A portata di mano, dove li vedete ogni giorno.', (b) => b.status === 'toread', cmp('authors', 'title'));
+  for (const name of [...new Set([...rest].map((b) => b.series).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it'))) {
+    take('Serie: ' + name, 'In fila per numero. Lasciate un po\' di spazio accanto per i prossimi volumi.', (b) => b.series === name, cmp('seriesNum', 'title'));
+  }
+  take('Guide di viaggio', 'Tutte in fila: i dorsi uguali fanno arredamento.',
+    (b) => (b.genres || []).includes('Viaggi') || GUIDE_BRANDS.some((g) => text(b.authors).toLowerCase().includes(g.toLowerCase())), cmp('authors', 'title'));
+  // Dentro un genere si ordina per editore, così le collane (Adelphi, Einaudi…) finiscono vicine.
+  const collane = (items) => {
+    const count = {};
+    for (const b of items) if (b.publisher) count[b.publisher] = (count[b.publisher] || 0) + 1;
+    const near = Object.entries(count).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).map(([p, n]) => n + ' ' + p);
+    return near.length ? 'Vicini tra loro: ' + near.join(', ') + '.' : 'Ordinati per editore e autore.';
+  };
+  for (const g of state.genres) take(g, collane, (b) => (b.genres || [])[0] === g, cmp('publisher', 'authors', 'title'));
+  take('Senza genere', 'Assegnate un genere per sistemarli meglio.', () => true, cmp('publisher', 'authors', 'title'));
+  return groups;
+}
+
+function renderArrange() {
+  const groups = arrangeGroups();
+  $('arrange-body').innerHTML = groups.map((g) => `<section class="arr">
+    <h3>${esc(g.title)}<small>${g.items.length === 1 ? '1 libro' : g.items.length + ' libri'}</small></h3>
+    <p class="hint">${esc(g.hint)}</p>
+    <div class="shelf-unit"><div class="shelf-row">${g.items.map(spineHtml).join('')}</div><div class="plank"></div></div>
+    <details><summary>Elenco in ordine</summary><ol>${g.items.map((b) => `<li>${esc(b.title || 'Senza titolo')}${b.seriesNum ? ' (n. ' + esc(b.seriesNum) + ')' : ''}${b.authors ? ' · ' + esc(firstAuthor(b.authors)) : ''}</li>`).join('')}</ol></details>
+  </section>`).join('') || '<p class="hint">Aggiungete qualche libro per vedere i suggerimenti.</p>';
+}
+
 function matchesFilter(b) {
   if (!filterGenre) return true;
   if (filterGenre === 'loan') return Boolean(b.loanTo);
@@ -659,6 +704,7 @@ function renderList() {
       <span><b>${VIEWS[k][0]}</b><small>${VIEWS[k][2]}</small></span>
     </button>`).join('');
   $('shelf-sort').hidden = viewKind !== 'shelf' || wish;
+  $('btn-arrange').hidden = viewKind !== 'shelf' || wish || !owned.length;
   for (const b of document.querySelectorAll('#shelf-sort [data-sort]')) b.classList.toggle('on', b.dataset.sort === shelfSort);
 }
 
@@ -1478,7 +1524,7 @@ function init() {
   window.addEventListener('scroll', closeViewMenu, { passive: true });
   // Home: si torna sempre al punto zero, cioè tutte le copertine della libreria, senza filtri.
   $('btn-home').addEventListener('click', () => {
-    for (const id of ['view', 'book', 'settings', 'manual', 'filter-sheet']) hide(id);
+    for (const id of ['view', 'book', 'settings', 'manual', 'filter-sheet', 'arrange']) hide(id);
     closePeek();
     viewMode = 'library';
     viewKind = 'grid';
@@ -1490,6 +1536,13 @@ function init() {
     renderList();
     window.scrollTo(0, 0);
     document.querySelector('.top').classList.remove('away');
+  });
+  $('btn-arrange').addEventListener('click', () => { renderArrange(); show('arrange'); $('arrange-body').parentNode.scrollTop = 0; });
+  $('arrange-close').addEventListener('click', () => hide('arrange'));
+  $('arrange-body').addEventListener('click', (e) => {
+    const el = e.target.closest('[data-id]');
+    const book = el && state.books.find((b) => b.id === el.dataset.id);
+    if (book) openView(book);
   });
   $('btn-search').addEventListener('click', () => {
     const tools = $('tools');

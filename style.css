@@ -425,3 +425,16 @@ html, body { max-width: 100%; overflow-x: clip; }
 .top-row { gap: 10px; }
 .top-title { flex: 1; min-width: 0; }
 .top h1 { font-size: 21px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Suggerimento di disposizione ---------- */
+.arrange-btn { margin-top: 10px; width: 100%; justify-content: center; }
+.arr { margin-bottom: 26px; }
+.arr h3 { margin: 0 0 2px; font-size: 19px; }
+.arr h3 small { font: 500 14px/1 var(--font-body); margin-left: 6px; }
+.arr .hint { margin: 0 0 10px; }
+.arr .shelf-row { min-height: 0; }
+.arr .spine { max-height: 150px; }
+.arr details { margin-top: 8px; color: var(--muted); font-size: 15px; }
+.arr summary { cursor: pointer; min-height: 32px; }
+.arr ol { margin: 4px 0 0; padding-left: 24px; color: var(--ink); }
+.arr li { padding: 2px 0; }

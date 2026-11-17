@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 
@@ -49,6 +49,7 @@
     <div class="filters" id="filters" aria-label="Filtra per genere"></div>
     <button class="chip view-btn" id="view-cycle" aria-haspopup="true" aria-expanded="false"></button>
   </div>
+  <button class="chip arrange-btn" id="btn-arrange" hidden>Suggerisci come disporli</button>
   <div class="view-menu" id="view-menu" hidden></div>
   <div class="shelf-sort" id="shelf-sort" hidden>
     <div class="seg" role="group" aria-label="Ordina lo scaffale per">
@@ -119,6 +120,19 @@
     <p class="hint" id="manual-status">Utile per i libri senza codice a barre.</p>
     <div id="manual-results" class="results"></div>
     <button class="btn ghost wide" id="manual-empty">Compila una scheda vuota</button>
+  </div>
+</section>
+
+<!-- ============ SUGGERIMENTO DI DISPOSIZIONE ============ -->
+<section class="sheet" id="arrange" hidden aria-label="Come disporre i libri">
+  <div class="sheet-head">
+    <button class="btn ghost" id="arrange-close">Chiudi</button>
+    <h2>Come disporli</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <p class="hint">Gruppi di libri che stanno bene vicini. Dove metterli lo decidete voi: se un gruppo non entra in un ripiano, prosegue su quello sotto.</p>
+    <div id="arrange-body"></div>
   </div>
 </section>
 
@@ -368,7 +382,7 @@
 
 <div class="toast" id="toast" hidden role="status"></div>
 
-<script src="vendor/zxing.min.js?v=20"></script>
-<script src="app.js?v=20"></script>
+<script src="vendor/zxing.min.js?v=21"></script>
+<script src="app.js?v=21"></script>
 </body>
 </html>

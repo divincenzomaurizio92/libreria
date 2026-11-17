@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 35;
+const APP_VERSION = 36;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [

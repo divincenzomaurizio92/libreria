@@ -469,3 +469,11 @@ button.tag:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px
 .chip-pair .chip:last-child { flex: 0 0 auto; border-radius: 0 999px 999px 0; padding: 0 14px 0 10px; border-left: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent); }
 .chip-pair .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chip-pair svg { flex: 0 0 auto; }
+
+/* ---------- Elenco diviso in gruppi (arrivando da un'etichetta della scheda) ---------- */
+.list.grouped { display: grid; gap: 26px; padding-top: 20px; touch-action: pan-y; }
+.grid-in { display: grid; grid-template-columns: repeat(auto-fill, minmax(98px, 1fr)); gap: 20px 14px; }
+.grouped.z2 .grid-in { grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 16px 12px; }
+.grouped.z3 .grid-in { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 12px 10px; }
+.list.grouped .cell .cell-cover:has(img) { padding: 0; background: none !important; }
+.rows-in .book:last-child { border-bottom: 0; }

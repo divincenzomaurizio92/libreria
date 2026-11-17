@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 31;
+const APP_VERSION = 32;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -534,12 +534,24 @@ function spineHtml(b) {
 }
 
 /* Scaffale: una mensola per genere, per stanza o per persona. Nei desideri, una per lista. */
-function shelvesHtml(books, wish) {
-  const empty = wish ? '' : shelfSort === 'room' ? 'Senza posto' : shelfSort === 'owner' ? 'Di casa' : 'Senza genere';
+function groupBooks(books, by) {
+  const empty = by === 'owner' ? 'Di casa' : 'Senza genere';
+  const groups = new Map();
+  for (const b of books) {
+    const keys = by === 'owner' ? (ownersOf(b).length ? ownersOf(b) : [empty]) : [(b.genres || [])[0] || empty];
+    for (const k of keys) groups.set(k, [...(groups.get(k) || []), b]);
+  }
+  // Dal gruppo con più titoli a quello con meno; i gruppi vuoti non esistono proprio.
+  return [...groups].sort((a, b) => (a[0] === empty) - (b[0] === empty) || b[1].length - a[1].length || a[0].localeCompare(b[0], 'it'));
+}
+
+function shelvesHtml(books, wish, forced) {
+  const mode = forced || shelfSort;
+  const empty = wish ? '' : mode === 'room' ? 'Senza posto' : mode === 'owner' ? 'Di casa' : 'Senza genere';
   const keysOf = (b) => {
     if (wish) return [b.list];
-    if (shelfSort === 'room') return [b.shelf ? b.shelf + (b.shelfRow ? ' · ripiano ' + b.shelfRow : '') : empty];
-    if (shelfSort === 'owner') return ownersOf(b).length ? ownersOf(b) : [empty];
+    if (mode === 'room') return [b.shelf ? b.shelf + (b.shelfRow ? ' · ripiano ' + b.shelfRow : '') : empty];
+    if (mode === 'owner') return ownersOf(b).length ? ownersOf(b) : [empty];
     return [(b.genres || [])[0] || empty];
   };
   const groups = new Map();
@@ -634,6 +646,7 @@ function renderList() {
   const q = $('search').value.trim().toLowerCase();
   const sort = $('sort').value;
   const wish = viewMode === 'wish';
+  const grouped = !wish && Boolean(groupBy) && filterGenre === groupFor;
   const owned = state.books.filter((b) => !b.list);
   const wished = state.books.filter((b) => b.list);
   const base = wish ? wished : owned;
@@ -710,14 +723,23 @@ function renderList() {
   } else if (!books.length) {
     $('list').innerHTML = '<div class="empty"><strong>Nessun libro trovato</strong>Prova a cambiare ricerca o filtro.</div>';
   } else {
-    $('list').innerHTML = viewKind === 'grid' ? books.map(gridCellHtml).join('')
-      : viewKind === 'shelf' ? shelvesHtml(books, wish)
-      : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
+    if (grouped && viewKind !== 'shelf') {
+      const groups = groupBooks(books, groupBy);
+      books = groups.flatMap(([, items]) => items);
+      $('list').innerHTML = groups.map(([label, items]) => `<section class="group">
+        <h3 class="shelf-label">${esc(label)} · ${items.length}</h3>
+        <div class="${viewKind === 'grid' ? 'grid-in' : 'rows-in'}">${items.map((b) => (viewKind === 'grid' ? gridCellHtml(b) : bookRowHtml(b, `data-id="${esc(b.id)}"`))).join('')}</div>
+      </section>`).join('');
+    } else {
+      $('list').innerHTML = viewKind === 'grid' ? books.map(gridCellHtml).join('')
+        : viewKind === 'shelf' ? shelvesHtml(books, wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
+        : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
+    }
   }
   visibleIds = books.map((b) => b.id);
   $('btn-back').hidden = !backTo;
   const showing = total && books.length;
-  $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : '');
+  $('list').className = 'list' + (showing && viewKind === 'shelf' ? ' shelves' : showing && grouped ? ' grouped z' + gridZoom : showing && viewKind === 'grid' ? ' grid z' + gridZoom : '');
   // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
   $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>' + VIEWS[viewKind][0]
     + '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
@@ -725,7 +747,7 @@ function renderList() {
       <svg viewBox="0 0 24 24" aria-hidden="true">${VIEWS[k][1]}</svg>
       <span><b>${VIEWS[k][0]}</b><small>${VIEWS[k][2]}</small></span>
     </button>`).join('');
-  $('shelf-sort').hidden = viewKind !== 'shelf' || wish;
+  $('shelf-sort').hidden = viewKind !== 'shelf' || wish || grouped;
   $('btn-arrange').hidden = viewKind !== 'shelf' || wish || !owned.length;
   for (const b of document.querySelectorAll('#shelf-sort [data-sort]')) b.classList.toggle('on', b.dataset.sort === shelfSort);
 }
@@ -784,6 +806,10 @@ function closePeek() { $('peek').hidden = true; peekId = ''; }
 /* ================= SCHEDA DA LEGGERE ================= */
 
 let viewId = '';
+/* Arrivando da un'etichetta della scheda, l'elenco si divide in gruppi:
+   i libri di una persona per genere, i libri di un genere per persona. */
+let groupBy = '';   // 'genre' oppure 'owner'
+let groupFor = '';  // il filtro a cui il raggruppamento è legato: se il filtro cambia, i gruppi spariscono
 let backTo = null; // da dove si è partiti toccando un'etichetta: serve al tasto Indietro
 let visibleIds = []; // i libri mostrati nell'elenco, nel loro ordine: serve per passare al successivo
 const itDate = (d) => { const t = new Date(d); return isNaN(t) ? d : t.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' }); };
@@ -1735,6 +1761,8 @@ function init() {
       $('search').value = '';
       if (target.startsWith('list:')) { viewMode = 'wish'; filterList = target.slice(5); }
       else { viewMode = 'library'; filterGenre = target; }
+      groupBy = target.startsWith('owner:') ? 'genre' : target.startsWith('genre:') ? 'owner' : '';
+      groupFor = target;
       renderList();
       window.scrollTo(0, 0);
       document.querySelector('.top').classList.remove('away');

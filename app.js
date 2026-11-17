@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 36;
+const APP_VERSION = 37;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1064,7 +1064,38 @@ function readForm() {
   return b;
 }
 
-function saveBook() {
+/* Appena un libro diventa «Letto» si chiede com'era: stelle da 1 a 5 e due righe di commento.
+   Si può sempre rimandare: voto e commento restano modificabili dalla scheda. */
+let reviewId = '', reviewStars = 0;
+function renderReviewStars() {
+  $('review-stars').innerHTML = [1, 2, 3, 4, 5]
+    .map((n) => `<button type="button" class="${n <= reviewStars ? 'on' : ''}" data-star="${n}" aria-label="${n} su 5" aria-pressed="${n === reviewStars}">★</button>`).join('');
+}
+function openReview(b) {
+  reviewId = b.id;
+  reviewStars = Number(b.rating) || 0;
+  $('review-title').textContent = 'Com\'era «' + (b.title || 'questo libro') + '»?';
+  $('review-text').value = b.notes || '';
+  $('review-card').style.setProperty('--book', bookColor(b));
+  renderReviewStars();
+  show('review');
+}
+function saveReview() {
+  const b = state.books.find((x) => x.id === reviewId);
+  if (b) {
+    b.rating = reviewStars;
+    b.notes = $('review-text').value.trim();
+    b.updatedAt = Date.now();
+    saveState();
+    renderList();
+    if (!$('view').hidden && viewId === b.id) renderView(b);
+    toast(reviewStars || b.notes ? 'Recensione salvata' : 'Salvato');
+  }
+  hide('review');
+}
+
+function saveBook(noReview) {
+  const wasRead = current.book.status === 'read';
   const b = readForm();
   if (!b.title) {
     toast('Scrivi almeno il titolo.');
@@ -1087,6 +1118,8 @@ function saveBook() {
   if (!$('view').hidden) renderView(b);
   if (!$('batch').hidden) renderBatch();
   toast(b.list ? 'Salvato in «' + b.list + '»' : current.isNew ? 'Aggiunto in libreria' : 'Salvato', null, null, b.cover);
+  // Segnato «Letto» dal modulo senza dare un voto: si chiede subito la recensione.
+  if (!noReview && b.status === 'read' && !wasRead && !b.rating) openReview(b);
   return true;
 }
 
@@ -1772,7 +1805,7 @@ function hide(id) { $(id).hidden = true; scheduleBackSync(); }
    Il gesto o il tasto indietro chiude prima ciò che è aperto sopra l'elenco (anteprima, scheda,
    modulo, scanner…), poi l'elenco filtrato da un'etichetta, e solo alla fine esce dall'app.
    Si ottiene tenendo nella cronologia del browser una voce "di guardia" finché qualcosa è aperto. */
-const LAYERS = ['book', 'view', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
+const LAYERS = ['review', 'book', 'view', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
 let backGuard = false;
 let backPending = false;
 let backQueued = false;
@@ -2021,11 +2054,13 @@ function init() {
     const sb = st && state.books.find((x) => x.id === viewId);
     if (sb) {
       // Un tocco imposta lo stato; un secondo tocco sullo stesso lo toglie.
+      const wasRead = sb.status === 'read';
       setStatus(sb, sb.status === st.dataset.status ? '' : st.dataset.status);
       sb.updatedAt = Date.now();
       saveState();
       renderList();
       renderView(sb);
+      if (sb.status === 'read' && !wasRead) openReview(sb);
       return;
     }
     const btn = e.target.closest('[data-act]');
@@ -2291,13 +2326,23 @@ function init() {
   };
   $('f-list-add').addEventListener('click', addFormList);
   $('f-list-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFormList(); } });
-  $('book-save-next').addEventListener('click', () => { const s = current.status; if (saveBook()) { stickyStatus = s; hide('book'); openScanner(); } });
+  $('book-save-next').addEventListener('click', () => { const s = current.status; if (saveBook(true)) { stickyStatus = s; hide('book'); openScanner(); } });
   $('f-status').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-status]');
     if (!btn) return;
     current.status = current.status === btn.dataset.status ? '' : btn.dataset.status;
     renderFormStatus();
   });
+  $('review-stars').addEventListener('click', (e) => {
+    const s = e.target.closest('[data-star]');
+    if (!s) return;
+    const n = Number(s.dataset.star);
+    reviewStars = reviewStars === n ? 0 : n;
+    renderReviewStars();
+  });
+  $('review-save').addEventListener('click', saveReview);
+  $('review-later').addEventListener('click', () => hide('review'));
+  $('review').addEventListener('click', (e) => { if (e.target === $('review')) hide('review'); });
   $('book-refill').addEventListener('click', refillFromCatalogs);
   $('book-delete').addEventListener('click', () => {
     const b = current.book;

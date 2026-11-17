@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 28;
+const APP_VERSION = 29;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1492,8 +1492,57 @@ function deleteGenre(i) {
 
 /* ---------- Schede e avvisi ---------- */
 
-function show(id) { $(id).hidden = false; }
-function hide(id) { $(id).hidden = true; }
+function show(id) { $(id).hidden = false; scheduleBackSync(); }
+function hide(id) { $(id).hidden = true; scheduleBackSync(); }
+
+/* ---------- Tasto indietro del telefono ----------
+   Il gesto o il tasto indietro chiude prima ciò che è aperto sopra l'elenco (anteprima, scheda,
+   modulo, scanner…), poi l'elenco filtrato da un'etichetta, e solo alla fine esce dall'app.
+   Si ottiene tenendo nella cronologia del browser una voce "di guardia" finché qualcosa è aperto. */
+const LAYERS = ['book', 'view', 'settings', 'manual', 'scanner', 'arrange', 'filter-sheet'];
+let backGuard = false;
+let backPending = false;
+let backQueued = false;
+
+function topLayer() {
+  if (!$('peek').hidden && !$('peek').classList.contains('float')) return 'peek';
+  const open = LAYERS.find((id) => !$(id).hidden);
+  return open || (backTo ? 'filtered' : null);
+}
+
+function closeLayer(layer) {
+  if (layer === 'peek') closePeek();
+  else if (layer === 'scanner') closeScanner();
+  else if (layer === 'filtered') $('btn-back').click();
+  else hide(layer);
+}
+
+function syncBackGuard() {
+  backQueued = false;
+  if (backPending) return; // si aspetta che il browser abbia finito di tornare indietro
+  const open = topLayer() !== null;
+  try {
+    if (open && !backGuard) { history.pushState({ libreria: 1 }, ''); backGuard = true; }
+    else if (!open && backGuard) { backGuard = false; backPending = true; history.back(); }
+  } catch (e) { /* dove la cronologia non è disponibile, il tasto indietro resta quello del browser */ }
+}
+
+function scheduleBackSync() {
+  if (backQueued) return;
+  backQueued = true;
+  setTimeout(syncBackGuard, 0);
+}
+
+window.addEventListener('popstate', () => {
+  if (backPending) { backPending = false; scheduleBackSync(); return; }
+  backGuard = false;
+  const layer = topLayer();
+  if (layer) closeLayer(layer);
+  scheduleBackSync();
+});
+// Qualunque tocco può aprire o chiudere qualcosa: dopo ognuno si ricontrolla.
+document.addEventListener('click', scheduleBackSync);
+document.addEventListener('touchend', scheduleBackSync, { passive: true });
 
 let toastTimer = null;
 function toast(text, actionLabel, action, cover) {

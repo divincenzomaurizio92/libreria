@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 38;
+const APP_VERSION = 39;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -553,12 +553,11 @@ function gridCellHtml(b) {
   const initial = esc((b.title || '?').trim().charAt(0).toUpperCase() || '?');
   const inner = b.cover
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
-    : `<span class="ph-author">${esc(firstAuthor(b.authors))}</span><span class="ph-title">${esc(b.title || 'Senza titolo')}</span>`;
+    : `<span class="ph-title">${esc(b.title || 'Senza titolo')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(b.authors))}</span>`;
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}" data-id="${esc(b.id)}">
-    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
-    ${b.loanTo ? '<span class="tag loan">In prestito</span>' : ''}
   </button>`;
 }
 
@@ -693,6 +692,48 @@ function matchesOne(b, f) {
 }
 function matchesFilter(b) { return filterParts().every((f) => matchesOne(b, f)); }
 
+/* Quante copertine stanno in una riga, con la grandezza scelta: serve a mettere ogni riga sulla sua mensola. */
+function gridCols() {
+  const list = $('list');
+  const cs = getComputedStyle(list);
+  const w = list.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 12;
+  const land = matchMedia('(orientation: landscape) and (max-height: 520px)').matches;
+  const min = [land ? 96 : 98, 74, 58][gridZoom - 1];
+  const gap = [14, 12, 10][gridZoom - 1];
+  return Math.max(2, Math.floor((w + gap) / (min + gap)));
+}
+
+function shelfRowsHtml(books) {
+  const cols = gridCols();
+  let html = '';
+  for (let i = 0; i < books.length; i += cols) {
+    html += `<div class="shelf-line"><div class="shelf-books" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${books.slice(i, i + cols).map(gridCellHtml).join('')}</div><div class="plank"></div></div>`;
+  }
+  return html;
+}
+
+/* In cima alla libreria, senza filtri: file da scorrere di lato con i libri del momento. */
+function railsHtml(owned) {
+  const byAdded = (a, b) => (b.addedAt || 0) - (a.addedAt || 0);
+  const rails = [
+    ['In lettura', owned.filter((b) => b.status === 'reading').sort(byAdded)],
+    ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded)],
+    ['Ultimi arrivati', [...owned].sort(byAdded).slice(0, 12)],
+  ].filter(([, items]) => items.length);
+  return rails.map(([title, items]) => `<section class="rail-sec">
+    <h3 class="rail-label">${title}<small>${items.length}</small></h3>
+    <div class="rail">${items.map(gridCellHtml).join('')}</div>
+    <div class="plank"></div>
+  </section>`).join('');
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  const word = h >= 5 && h < 13 ? 'Buongiorno' : h >= 13 && h < 18 ? 'Buon pomeriggio' : 'Buonasera';
+  const me = pref('libreria.me', '');
+  return word + (me && state.owners.includes(me) ? ' ' + me : '');
+}
+
 function renderList() {
   const q = $('search').value.trim().toLowerCase();
   const sort = $('sort').value;
@@ -727,6 +768,8 @@ function renderList() {
   const many = wish ? ' desideri' : audio ? ' ascoltati' : ' libri';
   $('count').textContent = total === 0 ? (wish ? 'Nessun desiderio' : audio ? 'Nessun audiolibro' : 'Nessun libro')
     : (total === 1 ? one : total + many) + (books.length !== total ? ' · ' + books.length + ' mostrati' : '');
+  // Il numero dei libri è già nella scheda «Libreria (25)»: senza filtri in alto resta solo il saluto.
+  if (!wish && !audio && total && books.length === total) $('count').textContent = greeting();
   // Nei desideri: quanto costa comprare tutti i libri mostrati.
   if (wish && books.length) {
     const priced = books.filter((b) => Number(b.price) > 0);
@@ -796,7 +839,10 @@ function renderList() {
         <div class="${viewKind === 'grid' ? 'grid-in' : 'rows-in'}">${items.map((b) => (viewKind === 'grid' ? gridCellHtml(b) : bookRowHtml(b, `data-id="${esc(b.id)}"`))).join('')}</div>
       </section>`).join('');
     } else {
-      $('list').innerHTML = viewKind === 'grid' ? books.map(gridCellHtml).join('')
+      const home = !wish && !audio && viewKind === 'grid';
+      const rails = home && !filterGenre && !q && sort === 'recent' && owned.length >= 6;
+      $('list').innerHTML = home ? (rails ? railsHtml(owned) + '<h3 class="rail-label all-label">Tutti i libri</h3>' : '') + shelfRowsHtml(books)
+        : viewKind === 'grid' ? books.map(gridCellHtml).join('')
         : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
         : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
     }
@@ -804,7 +850,8 @@ function renderList() {
   visibleIds = books.map((b) => b.id);
   $('btn-back').hidden = !backTo;
   const showing = total && books.length;
-  $('list').className = 'list' + (showing && viewKind === 'shelf' ? ' shelves' : showing && grouped ? ' grouped z' + gridZoom : showing && viewKind === 'grid' ? ' grid z' + gridZoom : '');
+  const homeShelves = showing && !wish && !audio && viewKind === 'grid' && !grouped;
+  $('list').className = 'list' + (homeShelves ? ' home z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : showing && grouped ? ' grouped z' + gridZoom : showing && viewKind === 'grid' ? ' grid z' + gridZoom : '');
   // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
   $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>' + VIEWS[viewKind][0]
     + '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
@@ -1705,6 +1752,8 @@ function renderSettings() {
       <button class="btn ghost" data-place-del="${i}" ${used ? 'disabled' : ''} aria-label="Elimina ${esc(p)}">${used ? used + (used === 1 ? ' libro' : ' libri') : 'Elimina'}</button>
     </div>`;
   }).join('');
+  const me = pref('libreria.me', '');
+  $('me-pick').innerHTML = state.owners.map((o) => `<button type="button" class="chip${o === me ? ' on' : ''}" data-me="${esc(o)}" aria-pressed="${o === me}">${esc(o)}</button>`).join('');
   $('owner-list').innerHTML = state.owners.map((o, i) => {
     const used = state.books.filter((b) => ownersOf(b).includes(o)).length;
     return `<div class="genre-item">
@@ -1753,6 +1802,7 @@ function renameOwner(i, name) {
     if (ownersOf(b).includes(old)) { b.owners = [...new Set(ownersOf(b).map((o) => (o === old ? target : o)))]; delete b.owner; }
   }
   if (clash >= 0) state.owners.splice(i, 1); else state.owners[i] = name;
+  if (pref('libreria.me', '') === old) setPref('libreria.me', target);
   filterGenre = filterParts().map((p) => (p === 'owner:' + old ? 'owner:' + target : p)).join('|');
   saveState();
   renderSettings();
@@ -2193,6 +2243,19 @@ function init() {
     renderList();
   });
   $('owner-add').addEventListener('click', addSettingsOwner);
+  $('me-pick').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-me]');
+    if (!chip) return;
+    setPref('libreria.me', chip.classList.contains('on') ? '' : chip.dataset.me);
+    renderSettings();
+    renderList();
+  });
+  // Ruotando il telefono o cambiando la finestra cambia il numero di copertine per mensola.
+  let lastCols = 0, resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { const c = gridCols(); if (c !== lastCols) { lastCols = c; if ($('list').classList.contains('home')) renderList(); } }, 150);
+  });
   $('covers-sharpen').addEventListener('click', sharpenCovers);
   $('place-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') addSettingsPlace(); });
   $('shelf-sort').addEventListener('click', (e) => {

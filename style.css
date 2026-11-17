@@ -538,3 +538,86 @@ button.tag:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px
 .list.grid.z3 .media-badge { width: 20px; height: 20px; }
 .list.grid.z3 .media-badge svg { width: 12px; height: 12px; }
 #arrange-metres:empty { display: none; }
+
+/* ================= v39: home più calda ================= */
+
+/* Luce calda, come una lampada da lettura accesa sopra la libreria. */
+body::before {
+  content: ''; position: fixed; left: 0; right: 0; top: 0; height: 70vh; z-index: 0; pointer-events: none;
+  background: radial-gradient(120% 75% at 50% -10%, rgba(226, 164, 75, .17), rgba(226, 164, 75, .05) 45%, transparent 75%);
+}
+.list { position: relative; z-index: 1; }
+
+/* Testata più leggera: vetro scuro sopra le copertine, schede sottolineate invece dei riquadri. */
+.top {
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+  border-bottom-color: color-mix(in srgb, var(--line) 60%, transparent);
+  padding-top: calc(10px + env(safe-area-inset-top)); padding-bottom: 8px;
+  transition: transform .25s ease;
+}
+.top .icon-btn { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.tabs { margin-top: 8px; padding: 0; gap: 0; background: none; border-radius: 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.tab { min-height: 38px; border-radius: 0; background: none; color: var(--muted); font-weight: 600; box-shadow: none; }
+.tab.on { background: none; color: var(--ink); box-shadow: inset 0 -2.5px 0 var(--accent); }
+.filter-row { padding-top: 8px; }
+.filter-row .chip { min-height: 34px; }
+
+/* Copertine come libri veri: dorso scuro a sinistra, un filo di luce, ombra sulla mensola. */
+.cell-cover { border-radius: 2px 5px 5px 2px; box-shadow: 0 1px 2px rgba(0, 0, 0, .5), 3px 4px 10px rgba(0, 0, 0, .35); }
+.cell-cover::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(to right, rgba(0, 0, 0, .38), rgba(255, 255, 255, .12) 2.5%, rgba(0, 0, 0, .12) 5%, transparent 10%),
+              linear-gradient(to bottom, rgba(255, 255, 255, .06), transparent 30%);
+}
+.cell-cover .badge, .media-badges { z-index: 2; }
+.loan-badge { top: auto; bottom: 8px; background: var(--warn, #C9744A); color: #fff; }
+
+/* Segnaposto: copertina in tela con titolo in corsivo e filetto dorato. */
+.cell-cover:not(:has(img)) {
+  justify-content: center; align-items: center; text-align: center; gap: 7px; padding: 12px 10px;
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, .04) 0 1px, transparent 1px 3px),
+                    repeating-linear-gradient(-45deg, rgba(0, 0, 0, .07) 0 1px, transparent 1px 3px);
+}
+.cell-cover:not(:has(img))::before {
+  content: ''; position: absolute; inset: 6px 6px 6px 9px; border: 1px solid rgba(233, 199, 107, .55); border-radius: 2px; pointer-events: none;
+}
+.cell-cover .ph-title { font: italic 600 14px/1.15 var(--font-display); }
+.cell-cover .ph-rule { width: 22px; height: 1.5px; background: rgba(233, 199, 107, .85); flex: 0 0 auto; }
+.cell-cover .ph-author { font: 600 8.5px/1.2 var(--font-body); letter-spacing: .12em; text-transform: uppercase; opacity: .85; }
+.z2 .cell-cover .ph-title { font-size: 11px; }
+.z3 .cell-cover .ph-title { font-size: 9px; }
+.z3 .cell-cover .ph-rule { width: 14px; }
+.z2 .cell-cover:not(:has(img))::before, .z3 .cell-cover:not(:has(img))::before { inset: 4px 4px 4px 6px; }
+
+/* Home: ogni riga di copertine poggia sulla sua mensola. */
+.list.home { display: block; padding-top: 14px; }
+.list.home .cell-title, .list.home .cell .tag, .list.home .cell-price { display: none; }
+.list.home .cell { gap: 0; }
+.shelf-line { margin-bottom: 26px; }
+.shelf-books { display: grid; gap: 0 14px; align-items: end; padding: 0 8px; }
+.z2 .shelf-books { gap: 0 12px; }
+.z3 .shelf-books { gap: 0 10px; padding: 0 6px; }
+.z3 .shelf-line { margin-bottom: 20px; }
+.list.home .plank {
+  height: 11px; margin: 0; border-radius: 2px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--wood) 70%, #fff) 0, var(--wood) 2px, var(--wood-dark) 100%);
+  box-shadow: 0 7px 12px -4px rgba(0, 0, 0, .55);
+}
+
+/* Sezioni da scorrere: In lettura, Da leggere, Ultimi arrivati. */
+.rail-sec { margin-bottom: 22px; }
+.rail-label { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font: 600 19px/1.2 var(--font-display); color: var(--ink); }
+.rail-label small { font: 500 13px/1 var(--font-body); color: var(--muted); }
+.all-label { margin-top: 6px; margin-bottom: 14px; }
+.rail {
+  display: flex; gap: 14px; align-items: flex-end; overflow-x: auto; scroll-snap-type: x proximity;
+  margin: 0 -16px; padding: 4px 24px 0; scrollbar-width: none; touch-action: pan-x pan-y;
+}
+.rail::-webkit-scrollbar { display: none; }
+.rail .cell { flex: 0 0 92px; scroll-snap-align: start; }
+.rail-sec .plank { margin: 0 -8px !important; }
+
+.rail { scroll-padding-left: 24px; scroll-padding-right: 24px; }
+.rail .cell { flex-basis: 80px; }
+.top .count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

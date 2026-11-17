@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1527,6 +1527,8 @@ function init() {
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('list').addEventListener(type, cancelPress);
   $('list').addEventListener('touchstart', (e) => { if (e.touches.length > 1) cancelPress(); }, { passive: true });
   $('list').addEventListener('contextmenu', (e) => { if (e.target.closest('[data-id]')) e.preventDefault(); });
+  for (const id of ['list', 'peek']) $(id).addEventListener('selectstart', (e) => e.preventDefault());
+  $('peek').addEventListener('contextmenu', (e) => e.preventDefault());
   let hoverTimer = null;
   $('list').addEventListener('mouseover', (e) => {
     const el = e.target.closest('[data-id]');

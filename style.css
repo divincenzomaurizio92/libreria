@@ -360,3 +360,7 @@ h1 { font-size: 28px; }
 .peek .btn.primary { background: var(--book); color: var(--book-ink); }
 .peek.float .btn { display: none; }
 @media (prefers-reduced-motion: no-preference) { .peek-card { animation: pop .18s ease-out; } }
+
+/* Tenendo premuto non si deve selezionare testo: né nell'elenco né nel riquadro dell'anteprima. */
+.list, .list *, .peek, .peek * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.list [data-id], .peek { -webkit-tap-highlight-color: transparent; }

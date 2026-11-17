@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 37;
+const APP_VERSION = 38;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -86,6 +86,25 @@ function googleUrl(query) {
 }
 
 /* Proprietari di un libro: elenco di nomi. I libri salvati prima della versione 9 avevano un solo nome. */
+/* Supporto: un libro della libreria può essere cartaceo, su Kindle o tutti e due. Senza indicazione è cartaceo.
+   Gli audiolibri (audio: true) stanno in una sezione a parte: non sono in libreria né tra i desideri. */
+const MEDIA = { paper: 'Cartaceo', kindle: 'Kindle', audio: 'Audible' };
+/* Lo stesso titolo può esistere in più forme insieme. Un libro in libreria senza indicazione è cartaceo.
+   Un libro in lista desideri è il cartaceo che si vorrebbe: può comunque essere già su Kindle o ascoltato su Audible. */
+const mediaOf = (b) => {
+  const m = Array.isArray(b.media) ? Object.keys(MEDIA).filter((k) => b.media.includes(k)) : [];
+  return b.list ? m.filter((k) => k !== 'paper') : m.length ? m : ['paper'];
+};
+const hasPaper = (b) => mediaOf(b).includes('paper');
+const isOwned = (b) => !b.list || mediaOf(b).length > 0; // lo si ha in almeno una forma
+const MEDIA_ICON = {
+  kindle: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9.5 7.5h5M9.5 11h5M9.5 14.5h3"/></svg>',
+  audio: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg>',
+};
+/* Il simbolo compare solo quando di quel titolo non c'è la copia di carta. */
+const mediaBadges = (b) => (hasPaper(b) ? '' : mediaOf(b).map((k) => `<span class="media-badge" title="${MEDIA[k]}" role="img" aria-label="${MEDIA[k]}">${MEDIA_ICON[k]}</span>`).join(''));
+/* Stima dello spazio sulla mensola: circa 1 mm ogni 15 pagine più la copertina; senza pagine, un libro medio. */
+const spineMm = (b) => (Number(b.pages) > 0 ? Number(b.pages) / 15 + (b.format === 'Copertina rigida' ? 8 : 4) : 22);
 const ownersOf = (b) => (Array.isArray(b.owners) ? b.owners : b.owner ? [b.owner] : []);
 
 /* Lettura: nessuna pagina da aggiornare, solo tre stati. Vuoto = non indicato. */
@@ -524,7 +543,7 @@ function bookRowHtml(b, attr) {
       ${b.authors ? `<span class="book-author">${esc(b.authors)}</span>` : ''}
       ${meta ? `<span class="book-meta">${esc(meta)}</span>` : ''}
       ${tags ? `<span class="book-tags">${tags}</span>` : ''}
-      ${b.id && !b.list && isIncomplete(b) ? '<span class="missing-dot">Dati da completare</span>' : ''}
+      ${b.id && isOwned(b) && isIncomplete(b) ? '<span class="missing-dot">Dati da completare</span>' : ''}
     </span>
   </button>`;
 }
@@ -536,7 +555,7 @@ function gridCellHtml(b) {
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-author">${esc(firstAuthor(b.authors))}</span><span class="ph-title">${esc(b.title || 'Senza titolo')}</span>`;
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}" data-id="${esc(b.id)}">
-    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}</span>
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
     ${b.loanTo ? '<span class="tag loan">In prestito</span>' : ''}
@@ -603,7 +622,7 @@ function renderFilterSheet() {
   }).join('');
   $('filter-body').innerHTML = html || '<p class="hint">Nessuna voce con questo nome.</p>';
   $('filter-clear').hidden = !filterGenre;
-  const n = state.books.filter((b) => !b.list && matchesFilter(b)).length;
+  const n = state.books.filter((b) => isOwned(b) && matchesFilter(b)).length;
   $('filter-done').textContent = filterGenre ? (n === 1 ? 'Vedi 1 libro' : 'Vedi ' + n + ' libri') : 'Vedi tutti i libri';
 }
 
@@ -612,7 +631,7 @@ function renderFilterSheet() {
    i "da leggere" a portata di mano; serie numerate e guide di viaggio sempre unite;
    per tutto il resto vince il genere e, dentro il genere, le collane stanno vicine. */
 function arrangeGroups() {
-  const rest = new Set(state.books.filter((b) => !b.list));
+  const rest = new Set(state.books.filter(hasPaper));
   const groups = [];
   const text = (v) => String(v || '');
   const cmp = (...keys) => (a, b) => { for (const k of keys) { const r = text(a[k]).localeCompare(text(b[k]), 'it', { numeric: true, sensitivity: 'base' }); if (r) return r; } return 0; };
@@ -627,6 +646,10 @@ function arrangeGroups() {
   take('Da leggere', 'A portata di mano, dove li vedete ogni giorno.', (b) => b.status === 'toread', cmp('authors', 'title'));
   for (const name of [...new Set([...rest].map((b) => b.series).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it'))) {
     take('Serie: ' + name, 'In fila per numero. Lasciate un po\' di spazio accanto per i prossimi volumi.', (b) => b.series === name, cmp('seriesNum', 'title'));
+  }
+  // Il tema taglia i generi: tutto il Giappone insieme, che sia narrativa, giallo o saggio.
+  for (const name of [...new Set([...rest].map((b) => b.theme).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it'))) {
+    take('Tema: ' + name, 'Tutti insieme, anche se di generi diversi. Dentro il tema, per genere e autore.', (b) => b.theme === name, (a, b) => text((a.genres || [])[0]).localeCompare(text((b.genres || [])[0]), 'it') || cmp('authors', 'title')(a, b));
   }
   take('Guide di viaggio', 'Tutte in fila: i dorsi uguali fanno arredamento.',
     (b) => (b.genres || []).includes('Viaggi') || GUIDE_BRANDS.some((g) => text(b.authors).toLowerCase().includes(g.toLowerCase())), cmp('authors', 'title'));
@@ -644,6 +667,13 @@ function arrangeGroups() {
 
 function renderArrange() {
   const groups = arrangeGroups();
+  const paper = state.books.filter(hasPaper);
+  const metres = paper.reduce((sum, b) => sum + spineMm(b), 0) / 1000;
+  const guessed = paper.filter((b) => !(Number(b.pages) > 0)).length;
+  $('arrange-metres').textContent = paper.length
+    ? 'I ' + paper.length + ' libri di carta occupano circa ' + (metres < 1 ? Math.round(metres * 100) + ' centimetri' : metres.toFixed(1).replace('.', ',') + ' metri') + ' di mensola (stima dalle pagine'
+      + (guessed ? '; per ' + guessed + ' senza pagine ho contato un libro medio' : '') + ').'
+    : '';
   $('arrange-body').innerHTML = groups.map((g) => `<section class="arr">
     <h3>${esc(g.title)}<small>${g.items.length === 1 ? '1 libro' : g.items.length + ' libri'}</small></h3>
     <p class="hint">${esc(g.hint)}</p>
@@ -654,6 +684,8 @@ function renderArrange() {
 
 function matchesOne(b, f) {
   if (f === 'loan') return Boolean(b.loanTo);
+  if (f.startsWith('media:')) return mediaOf(b).includes(f.slice(6));
+  if (f.startsWith('theme:')) return (b.theme || '') === f.slice(6);
   if (f.startsWith('owner:')) return ownersOf(b).includes(f.slice(6));
   if (f.startsWith('status:')) return (b.status || '') === f.slice(7);
   if (f.startsWith('place:')) return b.shelf === f.slice(6);
@@ -665,13 +697,15 @@ function renderList() {
   const q = $('search').value.trim().toLowerCase();
   const sort = $('sort').value;
   const wish = viewMode === 'wish';
-  const grouped = !wish && Boolean(groupBy) && filterGenre === groupFor;
-  const owned = state.books.filter((b) => !b.list);
+  const audio = viewMode === 'audio';
+  const grouped = !wish && !audio && Boolean(groupBy) && filterGenre === groupFor;
+  const owned = state.books.filter(isOwned);
   const wished = state.books.filter((b) => b.list);
-  const base = wish ? wished : owned;
+  const heard = state.books.filter((b) => mediaOf(b).includes('audio'));
+  const base = wish ? wished : audio ? heard : owned;
   let books = base.filter((b) => {
     if (wish && filterList && b.list !== filterList) return false;
-    if (!wish && !matchesFilter(b)) return false;
+    if (!wish && !audio && !matchesFilter(b)) return false;
     if (!q) return true;
     return [b.title, b.authors, b.publisher, b.isbn, b.notes].some((x) => String(x || '').toLowerCase().includes(q));
   });
@@ -682,15 +716,16 @@ function renderList() {
 
   $('tab-library').textContent = 'Libreria (' + owned.length + ')';
   $('tab-wish').textContent = 'Desideri (' + wished.length + ')';
-  for (const [id, on] of [['tab-library', !wish], ['tab-wish', wish]]) {
+  $('tab-audio').textContent = 'Audible (' + heard.length + ')';
+  for (const [id, on] of [['tab-library', !wish && !audio], ['tab-wish', wish], ['tab-audio', audio]]) {
     $(id).classList.toggle('on', on);
     $(id).setAttribute('aria-selected', on);
   }
 
   const total = base.length;
-  const one = wish ? '1 desiderio' : '1 libro';
-  const many = wish ? ' desideri' : ' libri';
-  $('count').textContent = total === 0 ? (wish ? 'Nessun desiderio' : 'Nessun libro')
+  const one = wish ? '1 desiderio' : audio ? '1 ascoltato' : '1 libro';
+  const many = wish ? ' desideri' : audio ? ' ascoltati' : ' libri';
+  $('count').textContent = total === 0 ? (wish ? 'Nessun desiderio' : audio ? 'Nessun audiolibro' : 'Nessun libro')
     : (total === 1 ? one : total + many) + (books.length !== total ? ' · ' + books.length + ' mostrati' : '');
   // Nei desideri: quanto costa comprare tutti i libri mostrati.
   if (wish && books.length) {
@@ -708,8 +743,12 @@ function renderList() {
     $('filters').innerHTML = state.wishlists.length
       ? chip('', 'Tutte', !filterList) + state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')
       : '';
+  } else if (audio) {
+    $('filters').innerHTML = '';
   } else {
     const used = state.genres.filter((g) => owned.some((b) => (b.genres || []).includes(g)));
+    const kindle = owned.some((b) => !hasPaper(b) || mediaOf(b).length > 1);
+    const themes = [...new Set(owned.map((b) => b.theme).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it'));
     // Un filtro alla volta: prestiti, proprietario oppure genere.
     const loans = owned.filter((b) => b.loanTo).length;
     const people = state.owners.filter((o) => owned.some((b) => ownersOf(b).includes(o)));
@@ -723,6 +762,8 @@ function renderList() {
       ['Prestiti', loans ? [['loan', 'In prestito', count((b) => Boolean(b.loanTo), 'loan')]] : []],
       ['Di chi è', people.map((o) => ['owner:' + o, o, count((b) => ownersOf(b).includes(o), 'owner')])],
       ['Dove sta', rooms.map((p) => ['place:' + p, p, count((b) => b.shelf === p, 'place')])],
+      ['Versione', kindle ? Object.keys(MEDIA).map((k) => ['media:' + k, MEDIA[k], count((b) => mediaOf(b).includes(k), 'media')]) : []],
+      ['Tema', themes.map((t) => ['theme:' + t, t, count((b) => b.theme === t, 'theme')])],
       ['Genere', used.map((g) => ['genre:' + g, g, count((b) => (b.genres || []).includes(g), 'genre')])],
     ].map(([title, items]) => [title, items.filter(([v, , n]) => n || parts.includes(v))]).filter(([, items]) => items.length);
     const all = filterGroups.flatMap(([, items]) => items);
@@ -738,7 +779,9 @@ function renderList() {
   }
 
   if (!total) {
-    $('list').innerHTML = wish
+    $('list').innerHTML = audio
+      ? `<div class="empty"><strong>Nessun audiolibro</strong>Tocca la penna e scrivi il titolo. Per un libro che avete già, apri la scheda e accendi «Audible» tra le versioni.</div>`
+      : wish
       ? `<div class="empty"><strong>Nessun desiderio</strong>Scansiona un libro in negozio, oppure aggiungilo con la penna: finirà nella lista che scegli.</div>`
       : `<div class="empty"><strong>La libreria è vuota</strong>
       Tocca il pulsante con il codice a barre, in basso a destra, e inquadra il retro del libro.</div>`;
@@ -754,7 +797,7 @@ function renderList() {
       </section>`).join('');
     } else {
       $('list').innerHTML = viewKind === 'grid' ? books.map(gridCellHtml).join('')
-        : viewKind === 'shelf' ? shelvesHtml(books, wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
+        : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
         : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
     }
   }
@@ -773,8 +816,8 @@ function renderList() {
       <svg viewBox="0 0 24 24" aria-hidden="true">${VIEWS[k][1]}</svg>
       <span><b>${VIEWS[k][0]}</b><small>${VIEWS[k][2]}</small></span>
     </button>`).join('');
-  $('shelf-sort').hidden = viewKind !== 'shelf' || wish || grouped;
-  $('btn-arrange').hidden = viewKind !== 'shelf' || wish || !owned.length;
+  $('shelf-sort').hidden = viewKind !== 'shelf' || wish || audio || grouped;
+  $('btn-arrange').hidden = viewKind !== 'shelf' || wish || audio || !owned.length;
   for (const b of document.querySelectorAll('#shelf-sort [data-sort]')) b.classList.toggle('on', b.dataset.sort === shelfSort);
 }
 
@@ -866,10 +909,13 @@ function renderView(b) {
   viewId = b.id;
   tintBook(bookColor(b));
   // Ogni etichetta porta all'elenco filtrato per quella voce. Nei desideri è attiva solo la lista.
+  const own = isOwned(b);
   const tags = [...(b.list ? [[b.list, 'list:' + b.list]] : []),
-    ...(b.genres || []).map((g) => [g, b.list ? '' : 'genre:' + g]),
-    ...ownersOf(b).map((o) => [o, b.list ? '' : 'owner:' + o]),
-    ...(b.shelf ? [[b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : ''), b.list ? '' : 'place:' + b.shelf]] : [])];
+    ...(b.genres || []).map((g) => [g, own ? 'genre:' + g : '']),
+    ...ownersOf(b).map((o) => [o, own ? 'owner:' + o : '']),
+    ...(mediaOf(b).length > 1 || !hasPaper(b) ? mediaOf(b).map((m) => [MEDIA[m], own ? 'media:' + m : '']) : []),
+    ...(b.theme ? [['Tema: ' + b.theme, own ? 'theme:' + b.theme : '']] : []),
+    ...(b.shelf ? [[b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : ''), own ? 'place:' + b.shelf : '']] : [])];
   const facts = [
     ['Letto nel', b.status === 'read' && b.readAt ? showRead(b.readAt) : ''],
     ['In lettura da', b.status === 'reading' && b.startedAt ? new Date(b.startedAt).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : ''],
@@ -894,7 +940,7 @@ function renderView(b) {
       </div>
       ${tags.length ? `<div class="hero-tags">${tags.map(([label, go]) => go ? `<button class="tag" data-goto="${esc(go)}">${esc(label)}</button>` : `<span class="tag still">${esc(label)}</span>`).join('')}</div>` : ''}
     </div>
-    ${b.list ? '' : `<div class="seg view-status" role="group" aria-label="Lettura">${Object.keys(STATUS).map((k) => `<button data-status="${k}" class="${b.status === k ? 'on' : ''}" aria-pressed="${b.status === k}">${STATUS[k]}</button>`).join('')}</div>`}
+    ${!isOwned(b) ? '' : `<div class="seg view-status" role="group" aria-label="Lettura">${Object.keys(STATUS).map((k) => `<button data-status="${k}" class="${b.status === k ? 'on' : ''}" aria-pressed="${b.status === k}">${STATUS[k]}</button>`).join('')}</div>`}
     ${b.loanTo ? `<p class="banner" style="margin-top:16px">In prestito a ${esc(b.loanTo)}${b.loanDate ? ' dal ' + esc(itDate(b.loanDate)) : ''}.</p>` : ''}
     ${b.plot ? `<p class="view-label">Trama</p><p class="plot${b.plot.length > 320 ? ' clamp' : ''}" id="view-plot">${esc(b.plot)}</p>${b.plot.length > 320 ? '<button class="link-btn" data-act="plot">Leggi tutto</button>' : ''}` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
@@ -912,13 +958,14 @@ function renderView(b) {
 
 let current = null; // { book, isNew, selected:Set }
 
-const FIELDS = ['title', 'subtitle', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'format', 'boughtAt', 'price', 'loanTo', 'loanDate'];
+const FIELDS = ['title', 'subtitle', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'theme', 'format', 'boughtAt', 'price', 'loanTo', 'loanDate'];
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
   // Un libro nuovo va dove si sta guardando: in libreria, oppure nella lista desideri aperta.
   const defaultList = viewMode === 'wish' ? (filterList || state.wishlists[0] || '') : '';
-  current = { book: { ...book }, isNew, selected: new Set(book.genres || []), list: isNew ? (book.list ?? defaultList) : (book.list || '') };
+  current = { book: { ...book }, isNew, selected: new Set(book.genres || []), list: isNew ? (book.list ?? defaultList) : (book.list || ''), media: new Set(mediaOf(book)) };
+  if (current.list) current.media.delete('paper');
   $('book-heading').textContent = isNew ? 'Nuovo libro' : 'Scheda libro';
   for (const k of FIELDS) $('f-' + k).value = book[k] || '';
   current.owners = new Set(ownersOf(book));
@@ -933,6 +980,7 @@ function openBook(book, opts = {}) {
   $('f-place-new').value = '';
   renderFormPlaces();
   $('series-options').innerHTML = options('series');
+  $('theme-options').innerHTML = options('theme');
   renderFormOwners();
   renderFormRating();
   $('f-genre-new').value = '';
@@ -978,7 +1026,7 @@ function renderFormStatus() {
     b.setAttribute('aria-pressed', b.dataset.status === current.status);
   }
   // Lo stato di lettura vale per i libri posseduti, non per i desideri.
-  $('f-status-field').hidden = Boolean(current.list);
+  $('f-status-field').hidden = Boolean(current.list) && !current.media.size;
   $('f-readAt-field').hidden = current.status !== 'read';
   if (current.status === 'read' && !$('f-readAt').value && current.book.status === 'reading') $('f-readAt').value = todayIt();
 }
@@ -1014,6 +1062,11 @@ function renderFormRating() {
 function renderFormLists() {
   const chip = (value, label) => `<button type="button" class="chip${current.list === value ? ' on' : ''}" data-list="${esc(value)}" aria-pressed="${current.list === value}">${esc(label)}</button>`;
   $('f-lists').innerHTML = chip('', 'In libreria') + state.wishlists.map((l) => chip(l, l)).join('');
+  // In lista desideri il cartaceo è quello che si vorrebbe: restano da indicare Kindle e Audible, se ci sono già.
+  $('f-media-label').innerHTML = current.list ? 'Ce l\'ho già in versione <small>(facoltativo: il cartaceo è il desiderio)</small>' : 'Ce l\'ho in versione <small>(anche più di una)</small>';
+  $('f-media').innerHTML = Object.keys(MEDIA).filter((k) => !(current.list && k === 'paper')).map((k) => `<button type="button" class="chip${current.media.has(k) ? ' on' : ''}" data-media="${k}" aria-pressed="${current.media.has(k)}">${MEDIA[k]}</button>`).join('');
+  $('book').classList.toggle('is-digital', !current.list && !current.media.has('paper'));
+  renderFormStatus();
 }
 
 function addWishlist(name) {
@@ -1052,7 +1105,10 @@ function readForm() {
   b.isbn = toIsbn13(b.isbn) || cleanIsbn(b.isbn);
   b.genres = state.genres.filter((g) => current.selected.has(g));
   b.list = current.list || '';
-  setStatus(b, b.list ? '' : current.status);
+  b.media = Object.keys(MEDIA).filter((k) => current.media.has(k) && !(b.list && k === 'paper'));
+  if (!b.list && !b.media.length) b.media = ['paper'];
+  if (!b.list && !b.media.includes('paper')) { current.place = ''; b.format = ''; b.loanTo = ''; }
+  setStatus(b, isOwned(b) ? current.status : '');
   if (b.status === 'read' && $('f-readAt').value) b.readAt = $('f-readAt').value;
   b.shelf = current.place || '';
   if (!b.shelf) b.shelfRow = '';
@@ -1483,9 +1539,10 @@ function showCheckResult(isbn) {
   scan.found = book || null;
   scan.isbn = isbn;
   if (navigator.vibrate) navigator.vibrate(book && !book.list ? [60, 60, 60] : 60);
-  $('scan-answer').textContent = !book ? 'No, non ce l\'avete' : book.list ? 'È tra i desideri' : 'Sì, ce l\'avete già';
+  const digital = book && !book.list && !hasPaper(book);
+  $('scan-answer').textContent = !book ? 'No, non ce l\'avete' : book.list ? 'È tra i desideri' : digital ? 'Di carta no' : 'Sì, ce l\'avete già';
   $('scan-detail').textContent = !book ? 'ISBN ' + isbn
-    : '«' + book.title + '»' + (book.list ? ' è nella lista ' + book.list + '.' : book.loanTo ? ' è in libreria, in prestito a ' + book.loanTo + '.' : ' è in libreria' + (book.shelf ? ': ' + book.shelf : '') + '.');
+    : '«' + book.title + '»' + (book.list ? ' è nella lista ' + book.list + '.' : digital ? ' lo avete solo su ' + mediaOf(book).map((m) => MEDIA[m]).join(' e ') + '.' : book.loanTo ? ' è in libreria, in prestito a ' + book.loanTo + '.' : ' è in libreria' + (book.shelf ? ': ' + book.shelf : '') + '.');
   $('scan-open').hidden = !book;
   $('scan-wish').hidden = Boolean(book);
   show('scan-result');
@@ -1543,11 +1600,15 @@ async function scanFromPhoto(file) {
 /* ================= 8. AGGIUNTA A MANO ================= */
 
 let manualResults = [];
+let manualSeq = 0, manualTimer = null;
 
-async function manualSearch(text) {
+/* live = ricerca partita da sola mentre si scrive: non apre schede e non mostra errori di passaggio. */
+async function manualSearch(text, live) {
   text = text.trim();
   if (!text) return;
+  const seq = ++manualSeq;
   const isbn = toIsbn13(text);
+  if (live && (isbn || /^[\d\s-]+$/.test(text))) return; // un ISBN si cerca solo con «Cerca»
   if (isbn) {
     $('manual-status').textContent = 'Cerco ' + isbn + '…';
     await handleIsbn(isbn);
@@ -1555,24 +1616,27 @@ async function manualSearch(text) {
     return;
   }
   $('manual-status').textContent = 'Cerco…';
-  $('manual-results').innerHTML = '';
+  if (!live) $('manual-results').innerHTML = '';
   try {
-    manualResults = await searchByText(text);
+    const found = await searchByText(text);
+    if (seq !== manualSeq) return; // nel frattempo è stato scritto altro: questi risultati sono vecchi
+    manualResults = found;
     $('manual-status').textContent = manualResults.length ? 'Tocca l\'edizione giusta.' : 'Nessun risultato: prova con altre parole.';
     $('manual-results').innerHTML = manualResults.map((b, i) => bookRowHtml(b, `data-result="${i}"`)).join('');
   } catch (e) {
-    $('manual-status').textContent = 'Catalogo non raggiungibile: controlla la connessione.';
+    if (seq === manualSeq) $('manual-status').textContent = 'Catalogo non raggiungibile: controlla la connessione.';
   }
 }
 
 function pickManualResult(i) {
   const data = manualResults[i];
   if (!data) return;
+  const toAudio = viewMode === 'audio';
   const dup = data.isbn && state.books.find((b) => b.isbn === data.isbn);
   hide('manual');
   if (dup) return openBook(dup, { banner: dup.list ? 'Questo libro è già nella lista desideri «' + dup.list + '».' : 'Questo libro è già in libreria.' });
   const s = suggestGenres(data.subjects, data.authors, data.description);
-  openBook({ ...data, subjects: undefined, description: undefined, plot: data.description || '', plotTried: true, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
+  openBook({ ...data, list: toAudio ? '' : undefined, media: toAudio ? ['audio'] : undefined, subjects: undefined, description: undefined, plot: data.description || '', plotTried: true, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
 }
 
 /* ================= 9. IMPOSTAZIONI, BACKUP, ESPORTAZIONE ================= */
@@ -1595,9 +1659,9 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['subtitle', 'Sottotitolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['format', 'Formato'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['subtitle', 'Sottotitolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['status', 'Lettura'], ['readAt', 'Letto nel'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['format', 'Formato'], ['media', 'Versione'], ['theme', 'Tema'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
-  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : c[0] === 'status' ? (STATUS[b.status] || '') : b[c[0]])).join(';')));
+  const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'media' ? mediaOf(b).map((m) => MEDIA[m]) : c[0] === 'owners' ? ownersOf(b) : c[0] === 'status' ? (STATUS[b.status] || '') : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
 }
 
@@ -1900,6 +1964,11 @@ function init() {
   $('filter-done').addEventListener('click', () => { hide('filter-sheet'); window.scrollTo(0, 0); });
   $('tab-library').addEventListener('click', () => { backTo = null; viewMode = 'library'; renderList(); });
   $('tab-wish').addEventListener('click', () => { backTo = null; viewMode = 'wish'; renderList(); });
+  $('tab-audio').addEventListener('click', () => {
+    backTo = null; viewMode = 'audio';
+    if (viewKind === 'shelf') viewKind = flatView === 'list' ? 'list' : 'grid'; // gli audiolibri non stanno su uno scaffale
+    renderList();
+  });
   const closeViewMenu = () => { $('view-menu').hidden = true; $('view-cycle').setAttribute('aria-expanded', 'false'); };
   $('view-cycle').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2084,7 +2153,7 @@ function init() {
       return;
     }
     if (btn.dataset.act === 'returned') { b.loanTo = ''; b.loanDate = ''; }
-    if (btn.dataset.act === 'bought') { b.list = ''; if (!b.boughtAt) b.boughtAt = today(); }
+    if (btn.dataset.act === 'bought') { const had = mediaOf(b); b.list = ''; b.media = ['paper', ...had]; if (!b.boughtAt) b.boughtAt = today(); }
     b.updatedAt = Date.now();
     saveState();
     renderList();
@@ -2133,13 +2202,7 @@ function init() {
     setPref('libreria.shelfSort', shelfSort);
     renderList();
   });
-  $('theme-seg').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-theme-set]');
-    if (!btn) return;
-    setPref('libreria.theme', btn.dataset.themeSet);
-    applyTheme(btn.dataset.themeSet);
-  });
-  applyTheme(pref('libreria.theme', 'night'));
+  applyTheme('night'); // il tema Giorno è stato tolto: resta solo Sera
   refreshColors();
   $('list').addEventListener('click', (e) => {
     if (press.fired) { press.fired = false; return; }
@@ -2263,7 +2326,13 @@ function init() {
     const row = e.target.closest('.book');
     if (row) pickManualResult(Number(row.dataset.result));
   });
-  $('manual-empty').addEventListener('click', () => { hide('manual'); openBook({ title: $('manual-q').value.trim(), genres: [] }); });
+  $('manual-empty').addEventListener('click', () => { hide('manual'); openBook(viewMode === 'audio' ? { title: $('manual-q').value.trim(), genres: [], list: '', media: ['audio'] } : { title: $('manual-q').value.trim(), genres: [] }); });
+  $('manual-q').addEventListener('input', () => {
+    clearTimeout(manualTimer);
+    const text = $('manual-q').value.trim();
+    if (text.length < 3) return;
+    manualTimer = setTimeout(() => manualSearch(text, true), 450);
+  });
 
   // Scheda libro
   $('book-form').addEventListener('submit', (e) => e.preventDefault());
@@ -2277,6 +2346,7 @@ function init() {
   });
   $('book-bought').addEventListener('click', () => {
     current.list = '';
+    current.media.add('paper');
     if (!$('f-boughtAt').value) $('f-boughtAt').value = today();
     if (saveBook()) hide('book');
   });
@@ -2310,10 +2380,20 @@ function init() {
     $('f-loanDate').value = '';
     if (saveBook()) hide('book');
   });
+  $('f-media').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-media]');
+    if (!chip) return;
+    const k = chip.dataset.media;
+    // Almeno un supporto resta sempre acceso.
+    if (current.media.has(k)) { if (current.media.size > 1 || current.list) current.media.delete(k); } else current.media.add(k);
+    renderFormLists();
+  });
   $('f-lists').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
+    const was = current.list;
     current.list = chip.dataset.list;
+    if (current.list) current.media.delete('paper'); else if (was) current.media.add('paper');
     renderFormLists();
     renderFormStatus();
   });
@@ -2432,7 +2512,9 @@ function init() {
 function openManual() {
   $('manual-q').value = '';
   $('manual-results').innerHTML = '';
-  $('manual-status').textContent = 'Utile per i libri senza codice a barre.';
+  $('manual-status').textContent = viewMode === 'audio' ? 'Scrivi il titolo dell\'audiolibro: i risultati arrivano mentre scrivi. Verrà salvato come ascoltato su Audible.' : 'Scrivi le prime lettere del titolo o dell\'autore: i risultati arrivano mentre scrivi.';
+  $('manual-title').textContent = viewMode === 'audio' ? 'Aggiungi un audiolibro' : 'Aggiungi a mano';
+  manualSeq++;
   show('manual');
   $('manual-q').focus();
 }

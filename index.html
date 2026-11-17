@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Libreria</title>
 <meta name="theme-color" content="#1F1712">
-<script>try { document.documentElement.dataset.theme = localStorage.getItem('libreria.theme') === 'day' ? 'day' : 'night'; } catch (e) {}</script>
+<script>document.documentElement.dataset.theme = 'night';</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Libreria">
 <link rel="manifest" href="manifest.webmanifest">
@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=37">
+<link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
 
@@ -37,6 +37,7 @@
   <div class="tabs" role="tablist">
     <button class="tab on" id="tab-library" role="tab" aria-selected="true">Libreria</button>
     <button class="tab" id="tab-wish" role="tab" aria-selected="false">Desideri</button>
+    <button class="tab" id="tab-audio" role="tab" aria-selected="false">Audible</button>
   </div>
   <div class="tools" id="tools" hidden>
     <input type="search" id="search" placeholder="Titolo, autore, ISBN, note" autocomplete="off" aria-label="Cerca nella libreria">
@@ -138,14 +139,14 @@
 <section class="sheet" id="manual" hidden aria-label="Aggiungi un libro a mano">
   <div class="sheet-head">
     <button class="btn ghost" id="manual-close">Chiudi</button>
-    <h2>Aggiungi a mano</h2>
+    <h2 id="manual-title">Aggiungi a mano</h2>
     <span></span>
   </div>
   <div class="sheet-body">
     <form id="manual-form" class="search-form">
       <label for="manual-q">ISBN, oppure titolo e autore</label>
       <div class="row">
-        <input id="manual-q" type="text" placeholder="Es. 9788806219352 oppure Il nome della rosa" autocomplete="off">
+        <input id="manual-q" type="text" placeholder="Es. Il nome della rosa, oppure 9788806219352" autocomplete="off">
         <button class="btn primary" type="submit">Cerca</button>
       </div>
     </form>
@@ -164,6 +165,7 @@
   </div>
   <div class="sheet-body">
     <p class="hint">Gruppi di libri che stanno bene vicini. Dove metterli lo decidete voi: se un gruppo non entra in un ripiano, prosegue su quello sotto.</p>
+    <p class="banner" id="arrange-metres"></p>
     <div id="arrange-body"></div>
   </div>
 </section>
@@ -250,6 +252,11 @@
       </div>
     </div>
 
+    <div class="field" id="f-media-field">
+      <label id="f-media-label">Ce l'ho in versione</label>
+      <div class="chips" id="f-media"></div>
+    </div>
+
     <div class="field" data-key="genres">
       <label>Genere <small id="f-genre-note"></small></label>
       <div class="chips" id="f-genres"></div>
@@ -301,6 +308,11 @@
       <label for="f-shelfRow">Ripiano <small>(facoltativo)</small></label>
       <input id="f-shelfRow" type="text" placeholder="Es. 2, oppure In alto">
     </div>
+    <div class="field">
+      <label for="f-theme">Tema <small>(facoltativo: es. Giappone, Montagna)</small></label>
+      <input id="f-theme" type="text" list="theme-options" placeholder="Unisce libri di generi diversi">
+      <datalist id="theme-options"></datalist>
+    </div>
     <div class="grid2 wide-first">
       <div class="field">
         <label for="f-series">Serie o saga</label>
@@ -331,7 +343,7 @@
       </div>
     </div>
 
-    <h3>Prestito</h3>
+    <h3 class="paper-only">Prestito</h3>
     <div class="grid2">
       <div class="field">
         <label for="f-loanTo">Prestato a</label>
@@ -372,11 +384,6 @@
   </div>
   <div class="sheet-body">
     <p class="hint" id="app-version"></p>
-    <h3>Aspetto</h3>
-    <div class="seg" id="theme-seg">
-      <button data-theme-set="day">Giorno</button>
-      <button data-theme-set="night">Sera</button>
-    </div>
     <h3>Backup</h3>
     <p class="hint" id="settings-info"></p>
     <div class="stack">
@@ -454,7 +461,7 @@
 
 <div class="toast" id="toast" hidden role="status"></div>
 
-<script src="vendor/zxing.min.js?v=37"></script>
-<script src="app.js?v=37"></script>
+<script src="vendor/zxing.min.js?v=38"></script>
+<script src="app.js?v=38"></script>
 </body>
 </html>

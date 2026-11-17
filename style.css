@@ -449,3 +449,10 @@ html, body, .sheet, .sheet-body { overscroll-behavior-x: none; }
 #view, #view-body { touch-action: pan-y; }
 #view { overflow: hidden; }
 #view-body { will-change: transform; }
+
+/* ---------- Scheda: titolo in alto, etichette che portano all'elenco ---------- */
+.hero-main { align-items: flex-start; }
+.hero-text { padding: 2px 0 0; }
+button.tag { border: 0; font: 500 14px/1.2 var(--font-body); color: var(--ink); cursor: pointer; min-height: 34px; }
+span.tag.still { min-height: 34px; display: inline-flex; align-items: center; opacity: .8; }
+button.tag:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }

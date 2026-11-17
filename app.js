@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 26;
+const APP_VERSION = 27;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -799,8 +799,11 @@ function openView(book) {
 function renderView(b) {
   viewId = b.id;
   tintBook(bookColor(b));
-  const tags = [...(b.list ? [b.list] : []), ...(b.genres || []), ...ownersOf(b).map((o) => 'Di ' + o),
-    ...(b.shelf ? [b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '')] : [])];
+  // Ogni etichetta porta all'elenco filtrato per quella voce. Nei desideri è attiva solo la lista.
+  const tags = [...(b.list ? [[b.list, 'list:' + b.list]] : []),
+    ...(b.genres || []).map((g) => [g, b.list ? '' : 'genre:' + g]),
+    ...ownersOf(b).map((o) => ['Di ' + o, b.list ? '' : 'owner:' + o]),
+    ...(b.shelf ? [[b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : ''), b.list ? '' : 'place:' + b.shelf]] : [])];
   const facts = [
     ['Letto nel', b.status === 'read' && b.readAt ? showRead(b.readAt) : ''],
     ['In lettura da', b.status === 'reading' && b.startedAt ? new Date(b.startedAt).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : ''],
@@ -821,11 +824,11 @@ function renderView(b) {
           ${b.rating ? `<span class="hero-stars" role="img" aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
         </div>
       </div>
-      ${tags.length ? `<div class="hero-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+      ${tags.length ? `<div class="hero-tags">${tags.map(([label, go]) => go ? `<button class="tag" data-goto="${esc(go)}">${esc(label)}</button>` : `<span class="tag still">${esc(label)}</span>`).join('')}</div>` : ''}
     </div>
     ${b.list ? '' : `<div class="seg view-status" role="group" aria-label="Lettura">${Object.keys(STATUS).map((k) => `<button data-status="${k}" class="${b.status === k ? 'on' : ''}" aria-pressed="${b.status === k}">${STATUS[k]}</button>`).join('')}</div>`}
     ${b.loanTo ? `<p class="banner" style="margin-top:16px">In prestito a ${esc(b.loanTo)}${b.loanDate ? ' dal ' + esc(itDate(b.loanDate)) : ''}.</p>` : ''}
-    ${b.plot ? `<p class="view-label">Di cosa parla</p><p class="plot${b.plot.length > 320 ? ' clamp' : ''}" id="view-plot">${esc(b.plot)}</p>${b.plot.length > 320 ? '<button class="link-btn" data-act="plot">Leggi tutto</button>' : ''}` : ''}
+    ${b.plot ? `<p class="view-label">Trama</p><p class="plot${b.plot.length > 320 ? ' clamp' : ''}" id="view-plot">${esc(b.plot)}</p>${b.plot.length > 320 ? '<button class="link-btn" data-act="plot">Leggi tutto</button>' : ''}` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
     ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
@@ -1658,6 +1661,18 @@ function init() {
   $('view-close').addEventListener('click', () => hide('view'));
   $('view-edit').addEventListener('click', () => { const b = state.books.find((x) => x.id === viewId); if (b) openBook(b); });
   $('view-body').addEventListener('click', (e) => {
+    const go = e.target.closest('[data-goto]');
+    if (go) {
+      const target = go.dataset.goto;
+      hide('view');
+      $('search').value = '';
+      if (target.startsWith('list:')) { viewMode = 'wish'; filterList = target.slice(5); }
+      else { viewMode = 'library'; filterGenre = target; }
+      renderList();
+      window.scrollTo(0, 0);
+      document.querySelector('.top').classList.remove('away');
+      return;
+    }
     const st = e.target.closest('[data-status]');
     const sb = st && state.books.find((x) => x.id === viewId);
     if (sb) {

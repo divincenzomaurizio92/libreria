@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 46; // va tenuto uguale al numero in version.json
+const APP_VERSION = 47; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -732,15 +732,17 @@ function homeSections(owned) {
 /* «Tutti i libri» diviso come lo Scaffale (stanza, genere o persona), con la scelta a destra del titolo.
    Se il filtro attivo è già su quel criterio (es. una persona e «Persona»), si divide per il criterio successivo. */
 let homeOrder = null;
+let homeSplit = pref('libreria.homeSplit', ''); // '' = tutti insieme, come prima; altrimenti 'room', 'genre' o 'owner'
 function homeGroupsHtml(books, asGrid) {
   const kinds = filterParts().map(filterKind);
-  const mode = [shelfSort, 'room', 'genre', 'owner'].find((m) => !kinds.includes(m === 'room' ? 'place' : m)) || 'genre';
-  const groups = shelfGroups(books, mode, false);
-  const only = groups.length === 1 && groups[0][2]; // tutti senza posto/genere/persona: niente divisione finta
+  const mode = homeSplit ? [homeSplit, 'room', 'genre', 'owner'].find((m) => !kinds.includes(m === 'room' ? 'place' : m)) || 'genre' : '';
+  const groups = mode ? shelfGroups(books, mode, false) : [];
+  const only = !mode || (groups.length === 1 && groups[0][2]); // tutti insieme, o tutti senza posto/genere/persona
   const seen = new Set();
-  homeOrder = groups.flatMap(([, items]) => items).filter((b) => !seen.has(b.id) && seen.add(b.id));
+  homeOrder = mode ? groups.flatMap(([, items]) => items).filter((b) => !seen.has(b.id) && seen.add(b.id)) : null;
   const sw = ['room', 'genre', 'owner'].map((m) => `<button data-hsort="${m}" class="${m === mode ? 'on' : ''}" aria-pressed="${m === mode}">${{ room: 'Stanza', genre: 'Genere', owner: 'Persona' }[m]}</button>`).join('');
-  const head = `<div class="all-head"><h3 class="rail-label all-label">${filterGenre ? 'Tutti' : 'Tutti i libri'}<small>${books.length}</small></h3><div class="hsort" role="group" aria-label="Dividi per">${sw}</div></div>`;
+  // «Tutti i libri» si tocca per tornare a vederli tutti insieme; le tre scelte a destra li dividono.
+  const head = `<div class="all-head"><h3 class="rail-label all-label"><button class="all-btn${mode ? '' : ' on'}" data-hsort="" aria-pressed="${!mode}">${filterGenre ? 'Tutti' : 'Tutti i libri'}<small>${books.length}</small></button></h3><div class="hsort" role="group" aria-label="Dividi per">${sw}</div></div>`;
   const body = (items) => (asGrid ? shelfRowsHtml(items) : items.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join(''));
   if (only) return head + body(books);
   return head + groups.map(([label, items]) => `<section class="home-group"><p class="group-label">${esc(label)}<small>${items.length}</small></p>${body(items)}</section>`).join('');
@@ -2408,8 +2410,10 @@ function init() {
   $('list').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-hsort]');
     if (!btn) return;
-    shelfSort = btn.dataset.hsort;
-    setPref('libreria.shelfSort', shelfSort);
+    const m = btn.dataset.hsort;
+    homeSplit = m && m !== homeSplit ? m : ''; // un secondo tocco sulla stessa scelta torna a tutti insieme
+    setPref('libreria.homeSplit', homeSplit);
+    if (homeSplit) { shelfSort = homeSplit; setPref('libreria.shelfSort', shelfSort); }
     renderList();
   });
   $('shelf-sort').addEventListener('click', (e) => {

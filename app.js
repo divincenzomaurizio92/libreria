@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 22;
+const APP_VERSION = 23;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -164,7 +164,8 @@ function fromGoogleItem(item) {
     pages: v.pageCount ? String(v.pageCount) : '',
     cover: httpsUrl(img.thumbnail || img.smallThumbnail),
     subjects: v.categories || [],
-    description: String(v.description || '').replace(/<[^>]+>/g, ' '),
+    description: String(v.description || '').replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n\n').trim(),
+    lang: v.language || '',
     seriesNum: String((v.seriesInfo && v.seriesInfo.bookDisplayNumber) || ''),
   };
 }
@@ -259,9 +260,9 @@ async function lookupIsbn(isbn) {
   const failed = results.every((r) => r.status === 'rejected');
   const googleDown = results[0].status === 'rejected';
   if (!found.length) return { data: null, failed, googleDown };
-  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '', seriesNum: '' };
+  const merged = { isbn, title: '', authors: '', publisher: '', year: '', pages: '', cover: '', subjects: [], description: '', seriesNum: '', lang: '' };
   for (const f of found) {
-    for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover', 'seriesNum']) if (!merged[k] && f[k]) merged[k] = f[k];
+    for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover', 'seriesNum', 'lang']) if (!merged[k] && f[k]) merged[k] = f[k];
     merged.subjects.push(...(f.subjects || []));
     if (!merged.description && f.description) merged.description = f.description;
   }
@@ -771,7 +772,23 @@ function closePeek() { $('peek').hidden = true; peekId = ''; }
 let viewId = '';
 const itDate = (d) => { const t = new Date(d); return isNaN(t) ? d : t.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' }); };
 
+const LANGS = { it: 'Italiano', en: 'Inglese', fr: 'Francese', es: 'Spagnolo', de: 'Tedesco', pt: 'Portoghese', ja: 'Giapponese' };
+
+/* I libri salvati prima della versione 23 non hanno la trama: la si cerca una volta sola, aprendo la scheda. */
+async function fetchPlot(book) {
+  if (book.plot || book.plotTried || !book.isbn) return;
+  book.plotTried = true;
+  try {
+    const data = await lookupGoogle(book.isbn);
+    if (data && data.description) book.plot = data.description;
+    if (data && data.lang && !book.lang) book.lang = data.lang;
+  } catch (e) { book.plotTried = false; /* senza rete si riprova la prossima volta */ }
+  saveState();
+  if (book.plot && viewId === book.id && !$('view').hidden) renderView(book);
+}
+
 function openView(book) {
+  fetchPlot(book);
   renderView(book);
   show('view');
   $('view-body').scrollTop = 0;
@@ -788,6 +805,7 @@ function renderView(b) {
     ['Casa editrice', b.publisher], ['Anno di questa edizione', b.year], ['Pagine', b.pages],
     ['Serie', b.series ? b.series + (b.seriesNum ? ', n. ' + b.seriesNum : '') : ''],
     ['Comprato il', b.boughtAt ? itDate(b.boughtAt) : ''], [b.list ? 'Prezzo di copertina' : 'Prezzo pagato', Number(b.price) > 0 ? euro(b.price) : ''],
+    ['Lingua', LANGS[b.lang] || ''],
     ['ISBN', b.isbn],
   ].filter(([, v]) => v);
   const links = storeLinks(b);
@@ -805,6 +823,7 @@ function renderView(b) {
     </div>
     ${b.list ? '' : `<div class="seg view-status" role="group" aria-label="Lettura">${Object.keys(STATUS).map((k) => `<button data-status="${k}" class="${b.status === k ? 'on' : ''}" aria-pressed="${b.status === k}">${STATUS[k]}</button>`).join('')}</div>`}
     ${b.loanTo ? `<p class="banner" style="margin-top:16px">In prestito a ${esc(b.loanTo)}${b.loanDate ? ' dal ' + esc(itDate(b.loanDate)) : ''}.</p>` : ''}
+    ${b.plot ? `<p class="view-label">Di cosa parla</p><p class="plot${b.plot.length > 320 ? ' clamp' : ''}" id="view-plot">${esc(b.plot)}</p>${b.plot.length > 320 ? '<button class="link-btn" data-act="plot">Leggi tutto</button>' : ''}` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
     ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
@@ -820,7 +839,7 @@ function renderView(b) {
 
 let current = null; // { book, isNew, selected:Set }
 
-const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'readAt', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
+const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'plot', 'readAt', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
@@ -1037,6 +1056,7 @@ async function refillFromCatalogs() {
   for (const k of ['title', 'authors', 'publisher', 'pages', 'year']) {
     if (!$('f-' + k).value.trim() && data[k]) { $('f-' + k).value = data[k]; filled++; }
   }
+  if (!$('f-plot').value.trim() && data.description) { $('f-plot').value = data.description; filled++; }
   if (!current.book.cover) {
     const cover = data.cover || (await probeCover(isbn));
     if (cover) { current.book.cover = cover; renderFormCover(); filled++; }
@@ -1076,7 +1096,7 @@ async function handleIsbn(isbn) {
   const s = suggestGenres(data.subjects, data.authors, data.description);
   const note = s.source === 'author' ? 'suggerito dai tuoi libri di ' + firstAuthor(data.authors)
     : s.source === 'catalog' ? 'suggerito dal catalogo, correggilo se serve' : 'scegline uno o più';
-  openBook({ ...data, subjects: undefined, description: undefined, genres: s.genres }, { genreNote: '(' + note + ')' });
+  openBook({ ...data, subjects: undefined, description: undefined, plot: data.description || '', plotTried: true, genres: s.genres }, { genreNote: '(' + note + ')' });
 }
 
 /* ================= 7. SCANNER ================= */
@@ -1297,7 +1317,7 @@ function pickManualResult(i) {
   hide('manual');
   if (dup) return openBook(dup, { banner: dup.list ? 'Questo libro è già nella lista desideri «' + dup.list + '».' : 'Questo libro è già in libreria.' });
   const s = suggestGenres(data.subjects, data.authors, data.description);
-  openBook({ ...data, subjects: undefined, description: undefined, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
+  openBook({ ...data, subjects: undefined, description: undefined, plot: data.description || '', plotTried: true, genres: s.genres }, { genreNote: s.genres.length ? '(suggerito, correggilo se serve)' : '(scegline uno o più)' });
 }
 
 /* ================= 9. IMPOSTAZIONI, BACKUP, ESPORTAZIONE ================= */
@@ -1601,6 +1621,11 @@ function init() {
     const btn = e.target.closest('[data-act]');
     const b = btn && state.books.find((x) => x.id === viewId);
     if (!b) return;
+    if (btn.dataset.act === 'plot') {
+      const clamped = $('view-plot').classList.toggle('clamp');
+      btn.textContent = clamped ? 'Leggi tutto' : 'Mostra meno';
+      return;
+    }
     if (btn.dataset.act === 'readdate') {
       openBook(b);
       $('f-readAt').scrollIntoView({ block: 'center' });

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -528,10 +528,25 @@ function shelvesHtml(books, wish) {
   </section>`).join('');
 }
 
+let filterGroups = [];
+
+function renderFilterSheet() {
+  const q = $('filter-q').value.trim().toLowerCase();
+  const html = filterGroups.map(([title, items]) => {
+    const shown = items.filter(([, label]) => !q || label.toLowerCase().includes(q));
+    if (!shown.length) return '';
+    return `<p class="view-label">${title}</p><div class="chips">${shown.map(([v, label, n]) =>
+      `<button class="chip${filterGenre === v ? ' on' : ''}" data-filter="${esc(v)}">${esc(label)} <small>${n}</small></button>`).join('')}</div>`;
+  }).join('');
+  $('filter-body').innerHTML = html || '<p class="hint">Nessuna voce con questo nome.</p>';
+  $('filter-clear').hidden = !filterGenre;
+}
+
 function matchesFilter(b) {
   if (!filterGenre) return true;
   if (filterGenre === 'loan') return Boolean(b.loanTo);
   if (filterGenre.startsWith('owner:')) return ownersOf(b).includes(filterGenre.slice(6));
+  if (filterGenre.startsWith('place:')) return b.shelf === filterGenre.slice(6);
   return (b.genres || []).includes(filterGenre.slice(6));
 }
 
@@ -578,12 +593,22 @@ function renderList() {
     // Un filtro alla volta: prestiti, proprietario oppure genere.
     const loans = owned.filter((b) => b.loanTo).length;
     const people = state.owners.filter((o) => owned.some((b) => ownersOf(b).includes(o)));
-    const options = [];
-    if (loans) options.push(['loan', 'In prestito (' + loans + ')']);
-    for (const o of people) options.push(['owner:' + o, o]);
-    for (const g of used) options.push(['genre:' + g, g]);
-    if (filterGenre && !options.some(([v]) => v === filterGenre)) filterGenre = '';
-    $('filters').innerHTML = options.length ? chip('', 'Tutti', !filterGenre) + options.map(([v, label]) => chip(v, label, filterGenre === v)).join('') : '';
+    const count = (test) => owned.filter(test).length;
+    const rooms = state.places.filter((p) => owned.some((b) => b.shelf === p));
+    // Le scelte stanno in un pannello a parte, divise per gruppo e con ricerca: reggono anche decine di generi.
+    filterGroups = [
+      ['Prestiti', loans ? [['loan', 'In prestito', loans]] : []],
+      ['Di chi è', people.map((o) => ['owner:' + o, o, count((b) => ownersOf(b).includes(o))])],
+      ['Dove sta', rooms.map((p) => ['place:' + p, p, count((b) => b.shelf === p)])],
+      ['Genere', used.map((g) => ['genre:' + g, g, count((b) => (b.genres || []).includes(g))])],
+    ].filter(([, items]) => items.length);
+    const all = filterGroups.flatMap(([, items]) => items);
+    const active = all.find(([v]) => v === filterGenre);
+    if (!active) filterGenre = '';
+    $('filters').innerHTML = all.length
+      ? `<button class="chip" data-open-filters><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filtra</button>`
+        + (active ? `<button class="chip on" data-genre="" aria-label="Togli il filtro ${esc(active[1])}">${esc(active[1])} ✕</button>` : '')
+      : '';
   }
 
   if (!total) {
@@ -611,6 +636,51 @@ document.addEventListener('error', (e) => {
   const el = e.target;
   if (el && el.tagName === 'IMG' && el.dataset.initial && el.parentNode) el.parentNode.textContent = el.dataset.initial;
 }, true);
+
+/* ================= ANTEPRIMA RAPIDA ================= */
+
+let peekId = '';
+
+function openPeek(id, anchor) {
+  const b = state.books.find((x) => x.id === id);
+  if (!b) return;
+  peekId = id;
+  const color = bookColor(b);
+  const peek = $('peek');
+  peek.style.setProperty('--book', color);
+  peek.style.setProperty('--book-ink', inkOn(color));
+  const place = b.shelf ? b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '') : '';
+  const facts = [
+    ['Genere', (b.genres || []).join(', ')], ['Dove sta', place], ['Di chi è', ownersOf(b).join(', ')],
+    ['Lista', b.list || ''], ['In prestito a', b.loanTo || ''],
+  ].filter(([, v]) => v);
+  $('peek-card').innerHTML = `
+    <div class="peek-main">
+      ${coverHtml(b)}
+      <div class="peek-text">
+        <strong>${esc(b.title || 'Senza titolo')}</strong>
+        ${b.authors ? `<span>${esc(b.authors)}</span>` : ''}
+        ${b.rating ? `<span aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
+      </div>
+    </div>
+    ${facts.length ? `<dl class="peek-facts">${facts.map(([k, v]) => `<div><b>${k}:</b> ${esc(v)}</div>`).join('')}</dl>` : ''}
+    <button class="btn primary wide" id="peek-open">Apri la scheda</button>`;
+  peek.classList.toggle('float', Boolean(anchor));
+  peek.hidden = false;
+  if (anchor) {
+    // Sul PC il riquadro si mette accanto alla copertina, senza coprirla.
+    const r = anchor.getBoundingClientRect();
+    const card = $('peek-card').getBoundingClientRect();
+    const left = r.right + 12 + card.width < window.innerWidth ? r.right + 12 : Math.max(8, r.left - card.width - 12);
+    peek.style.left = left + 'px';
+    peek.style.top = Math.max(8, Math.min(r.top, window.innerHeight - card.height - 8)) + 'px';
+  } else {
+    peek.style.left = '';
+    peek.style.top = '';
+  }
+}
+
+function closePeek() { $('peek').hidden = true; peekId = ''; }
 
 /* ================= SCHEDA DA LEGGERE ================= */
 
@@ -1318,8 +1388,24 @@ function init() {
   $('filters').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
+    if (chip.dataset.openFilters !== undefined) {
+      $('filter-q').value = '';
+      renderFilterSheet();
+      show('filter-sheet');
+      return;
+    }
     if (viewMode === 'wish') filterList = chip.dataset.genre; else filterGenre = chip.dataset.genre;
     renderList();
+  });
+  $('filter-close').addEventListener('click', () => hide('filter-sheet'));
+  $('filter-clear').addEventListener('click', () => { filterGenre = ''; renderList(); hide('filter-sheet'); });
+  $('filter-q').addEventListener('input', renderFilterSheet);
+  $('filter-body').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-filter]');
+    if (!chip) return;
+    filterGenre = filterGenre === chip.dataset.filter ? '' : chip.dataset.filter;
+    renderList();
+    hide('filter-sheet');
   });
   $('tab-library').addEventListener('click', () => { viewMode = 'library'; renderList(); });
   $('tab-wish').addEventListener('click', () => { viewMode = 'wish'; renderList(); });
@@ -1416,10 +1502,56 @@ function init() {
   applyTheme(pref('libreria.theme', 'night'));
   refreshColors();
   $('list').addEventListener('click', (e) => {
+    if (press.fired) { press.fired = false; return; }
     const row = e.target.closest('[data-id]');
     const book = row && state.books.find((b) => b.id === row.dataset.id);
+    closePeek();
     if (book) openView(book);
   });
+
+  // Anteprima rapida. Telefono: tenere premuto. PC: fermare il puntatore sulla copertina.
+  const press = { timer: null, fired: false, x: 0, y: 0 };
+  const cancelPress = () => { clearTimeout(press.timer); press.timer = null; };
+  $('list').addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('[data-id]');
+    if (!el || e.pointerType === 'mouse') return;
+    press.fired = false; press.x = e.clientX; press.y = e.clientY;
+    cancelPress();
+    press.timer = setTimeout(() => {
+      press.fired = true;
+      if (navigator.vibrate) navigator.vibrate(20);
+      openPeek(el.dataset.id);
+    }, 480);
+  });
+  $('list').addEventListener('pointermove', (e) => { if (press.timer && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress(); });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('list').addEventListener(type, cancelPress);
+  $('list').addEventListener('touchstart', (e) => { if (e.touches.length > 1) cancelPress(); }, { passive: true });
+  $('list').addEventListener('contextmenu', (e) => { if (e.target.closest('[data-id]')) e.preventDefault(); });
+  let hoverTimer = null;
+  $('list').addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-id]');
+    clearTimeout(hoverTimer);
+    if (!el || !window.matchMedia('(hover: hover)').matches) return;
+    hoverTimer = setTimeout(() => openPeek(el.dataset.id, el), 450);
+  });
+  $('list').addEventListener('mouseout', (e) => {
+    if (e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-id]') === e.target.closest('[data-id]')) return;
+    clearTimeout(hoverTimer);
+    if ($('peek').classList.contains('float')) closePeek();
+  });
+  $('peek').addEventListener('click', (e) => {
+    const id = peekId;
+    const open = e.target.closest('#peek-open');
+    if (!open && e.target.closest('.peek-card')) return;
+    closePeek();
+    const book = open && state.books.find((b) => b.id === id);
+    if (book) openView(book);
+  });
+  // Il gesto è nascosto: lo si dice una volta sola.
+  if (state.books.length && pref('libreria.hintPeek', '') !== '1' && !window.matchMedia('(hover: hover)').matches) {
+    setPref('libreria.hintPeek', '1');
+    setTimeout(() => toast('Tieni premuto su una copertina per vedere un\'anteprima.'), 900);
+  }
 
   // Scanner
   $('btn-scan').addEventListener('click', () => openScanner());

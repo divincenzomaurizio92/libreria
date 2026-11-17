@@ -338,3 +338,25 @@ h1 { font-size: 28px; }
 .view-actions { display: grid; gap: 10px; margin-top: 24px; }
 #view .btn.primary { background: var(--book); color: var(--book-ink); }
 #view .cover.big, #book .cover.big { background: var(--book); color: var(--book-ink); }
+
+/* ---------- Filtri in un pannello ---------- */
+.chip svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; vertical-align: -4px; margin-right: 6px; }
+.chip small { color: inherit; opacity: .7; margin-left: 4px; font-variant-numeric: tabular-nums; }
+#filter-body .chip { min-height: 42px; font-size: 16px; }
+
+/* ---------- Anteprima rapida: tocco prolungato sul telefono, puntatore fermo sul PC ---------- */
+.list [data-id] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.peek { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .6); }
+.peek.float { inset: auto; display: block; padding: 0; background: none; pointer-events: none; }
+.peek-card { width: min(340px, 100%); display: grid; gap: 14px; padding: 16px; border-radius: 16px; background: color-mix(in srgb, var(--book) 24%, var(--surface)); color: var(--ink); box-shadow: 0 16px 40px rgba(0, 0, 0, .45); }
+.peek.float .peek-card { width: 300px; }
+.peek-main { display: flex; gap: 14px; align-items: flex-end; }
+.peek-main .cover { width: 92px; height: 138px; flex: 0 0 auto; background: var(--book); color: var(--book-ink); border: 0; font-size: 28px; }
+.peek-text { display: grid; gap: 5px; min-width: 0; }
+.peek-text strong { font: 600 20px/1.15 var(--font-display); overflow-wrap: anywhere; }
+.peek-text span { color: var(--muted); font-size: 15px; }
+.peek-facts { display: grid; gap: 6px; font-size: 15px; margin: 0; }
+.peek-facts b { font-weight: 600; }
+.peek .btn.primary { background: var(--book); color: var(--book-ink); }
+.peek.float .btn { display: none; }
+@media (prefers-reduced-motion: no-preference) { .peek-card { animation: pop .18s ease-out; } }

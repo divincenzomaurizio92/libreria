@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -116,6 +116,19 @@
     <p class="hint" id="manual-status">Utile per i libri senza codice a barre.</p>
     <div id="manual-results" class="results"></div>
     <button class="btn ghost wide" id="manual-empty">Compila una scheda vuota</button>
+  </div>
+</section>
+
+<!-- ============ FILTRI ============ -->
+<section class="sheet" id="filter-sheet" hidden aria-label="Filtra i libri">
+  <div class="sheet-head">
+    <button class="btn ghost" id="filter-close">Chiudi</button>
+    <h2>Filtra</h2>
+    <button class="btn ghost" id="filter-clear">Togli filtro</button>
+  </div>
+  <div class="sheet-body">
+    <input type="search" id="filter-q" placeholder="Cerca un genere, una persona, un mobile" aria-label="Cerca tra i filtri" autocomplete="off">
+    <div id="filter-body"></div>
   </div>
 </section>
 
@@ -335,9 +348,11 @@
   </div>
 </section>
 
+<div class="peek" id="peek" hidden><div class="peek-card" id="peek-card"></div></div>
+
 <div class="toast" id="toast" hidden role="status"></div>
 
-<script src="vendor/zxing.min.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="vendor/zxing.min.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

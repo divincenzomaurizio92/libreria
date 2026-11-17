@@ -646,3 +646,11 @@ body::before {
 .disc-ghosts span:nth-child(3) { height: 85%; } .disc-ghosts span:nth-child(4) { height: 60%; transform: rotate(-12deg); transform-origin: bottom right; }
 .discover .rail { align-items: flex-start; }
 .discover .rail-label small { text-transform: none; letter-spacing: 0; }
+
+/* v42: vista con soli simboli */
+.view-toggle { flex: 0 0 auto; display: flex; padding: 3px; gap: 2px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); }
+.view-toggle[hidden] { display: none; }
+.view-toggle button { width: 38px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.view-toggle button.on { background: var(--accent); color: var(--accent-ink); }
+.view-toggle svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.view-toggle button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }

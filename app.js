@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 41;
+const APP_VERSION = 42;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -715,14 +715,15 @@ function shelfRowsHtml(books) {
 /* In cima alla libreria, senza filtri: file da scorrere di lato con i libri del momento. */
 function railsHtml(owned) {
   const byAdded = (a, b) => (b.addedAt || 0) - (a.addedAt || 0);
-  // Una sola mensola: prima i libri in lettura, poi quelli da leggere. Se sono tanti, si scorre di lato.
-  const items = [...owned.filter((b) => b.status === 'reading').sort(byAdded), ...owned.filter((b) => b.status === 'toread').sort(byAdded)];
-  if (!items.length) return '';
-  return `<section class="rail-sec">
-    <h3 class="rail-label">Sul comodino<small>${items.length}</small></h3>
+  // Sul comodino i libri in corso; i da leggere hanno la loro mensola. Se sono tanti, si scorre di lato.
+  return [
+    ['Sul comodino', owned.filter((b) => b.status === 'reading').sort(byAdded)],
+    ['Da leggere', owned.filter((b) => b.status === 'toread').sort(byAdded)],
+  ].filter(([, items]) => items.length).map(([title, items]) => `<section class="rail-sec">
+    <h3 class="rail-label">${title}<small>${items.length}</small></h3>
     <div class="rail" style="--rail-w:${[0, 98, 74, 58][gridZoom]}px">${items.map(gridCellHtml).join('')}</div>
     <div class="plank"></div>
-  </section>`;
+  </section>`).join('');
 }
 
 /* «Da scoprire», in cima ai Desideri: i più venduti e i libri simili ai vostri.
@@ -905,8 +906,8 @@ function renderList() {
   const homeShelves = showing && !wish && !audio && viewKind === 'grid' && !grouped;
   $('list').className = 'list' + (homeShelves ? ' home z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : showing && grouped ? ' grouped z' + gridZoom : showing && viewKind === 'grid' ? ' grid z' + gridZoom : '');
   // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
-  $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>' + VIEWS[viewKind][0]
-    + '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  // Solo i simboli: copertine e lista, un tocco per passare dall'una all'altra.
+  $('view-cycle').innerHTML = ['grid', 'list'].map((k) => `<button data-view="${k}" class="${k === viewKind ? 'on' : ''}" aria-pressed="${k === viewKind}" aria-label="${VIEWS[k][0]}"><svg viewBox="0 0 24 24" aria-hidden="true">${VIEWS[k][1]}</svg></button>`).join('');
   $('view-cycle').hidden = viewKind === 'shelf';
   $('btn-shelf').classList.toggle('on', viewKind === 'shelf');
   $('btn-shelf').setAttribute('aria-pressed', viewKind === 'shelf');
@@ -2073,12 +2074,6 @@ function init() {
   });
   const closeViewMenu = () => { $('view-menu').hidden = true; $('view-cycle').setAttribute('aria-expanded', 'false'); };
   $('view-cycle').addEventListener('click', (e) => {
-    e.stopPropagation();
-    const open = $('view-menu').hidden;
-    $('view-menu').hidden = !open;
-    $('view-cycle').setAttribute('aria-expanded', String(open));
-  });
-  $('view-menu').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-view]');
     if (!btn) return;
     viewKind = btn.dataset.view;

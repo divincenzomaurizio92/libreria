@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -360,6 +360,77 @@ function suggestGenres(subjects, authors, description) {
 
 const firstAuthor = (authors) => String(authors || '').split(',')[0].trim();
 
+/* ================= ASPETTO: tema, viste, colori ================= */
+
+function pref(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; } }
+function setPref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* si resta sul valore in memoria */ } }
+
+let viewKind = pref('libreria.view', 'grid');      // 'grid' copertine, 'list' lista, 'shelf' scaffale
+let shelfSort = pref('libreria.shelfSort', 'genre'); // 'genre', 'room', 'owner'
+
+function applyTheme(theme) {
+  const t = theme === 'day' ? 'day' : 'night';
+  document.documentElement.dataset.theme = t;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === 'day' ? '#EADBAA' : '#1F1712';
+  for (const b of document.querySelectorAll('[data-theme-set]')) b.classList.toggle('on', b.dataset.themeSet === t);
+}
+
+/* Colore di un libro: quello letto dalla copertina, altrimenti uno fisso scelto in base al titolo. */
+const SPINE_COLORS = ['#7A2E2B', '#1F3A4D', '#5E7A64', '#B5533C', '#D9A441', '#C9B79C', '#3F4A6B', '#6B3F5B', '#2F5D50', '#8A6A48', '#A8763E', '#4A4038'];
+function hashOf(text) { let h = 0; for (const c of String(text)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
+function bookColor(b) { return b.color || SPINE_COLORS[hashOf(b.title || b.isbn || '') % SPINE_COLORS.length]; }
+function inkOn(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 150 ? '#1E1A14' : '#FFF8EC';
+}
+
+/* Legge il colore dominante di una copertina. Con le immagini di altri siti il browser
+   può vietarlo: in quel caso restituisce '' e si usa il colore scelto dal titolo. */
+function extractColor(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (!src.startsWith('data:')) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 24; c.height = 36;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, 24, 36);
+        const d = ctx.getImageData(0, 0, 24, 36).data;
+        let R = 0, G = 0, B = 0, W = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          // I pixel più colorati pesano di più di bianchi, grigi e neri.
+          const w = (Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2])) / 255 + 0.08;
+          R += d[i] * w; G += d[i + 1] * w; B += d[i + 2] * w; W += w;
+        }
+        resolve('#' + [R, G, B].map((v) => Math.round(v / W).toString(16).padStart(2, '0')).join(''));
+      } catch (e) { resolve(''); }
+    };
+    img.onerror = () => resolve('');
+    img.src = src;
+  });
+}
+const coverKey = (b) => (b.cover ? b.cover.length + ':' + b.cover.slice(-24) : '');
+
+/* Calcola una volta sola il colore dei libri che non l'hanno ancora. */
+async function refreshColors() {
+  let changed = false;
+  for (const b of state.books) {
+    const key = coverKey(b);
+    if ((b.colorFor || '') === key) continue;
+    b.color = key ? await extractColor(b.cover) : '';
+    b.colorFor = key;
+    changed = true;
+  }
+  if (changed) { saveState(); renderList(); }
+}
+
+function tintBook(color) {
+  $('book').style.setProperty('--book', color);
+  $('book').style.setProperty('--book-ink', inkOn(color));
+}
+
 /* ================= 5. ELENCO DEI LIBRI ================= */
 
 let filterGenre = '';
@@ -395,6 +466,45 @@ function bookRowHtml(b, attr) {
       ${b.id && !b.list && isIncomplete(b) ? '<span class="missing-dot">Dati da completare</span>' : ''}
     </span>
   </button>`;
+}
+
+function gridCellHtml(b) {
+  const color = bookColor(b);
+  const initial = esc((b.title || '?').trim().charAt(0).toUpperCase() || '?');
+  const inner = b.cover
+    ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
+    : `<span class="ph-author">${esc(firstAuthor(b.authors))}</span><span class="ph-title">${esc(b.title || 'Senza titolo')}</span>`;
+  return `<button class="cell" data-id="${esc(b.id)}">
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}</span>
+    <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
+    ${b.loanTo ? '<span class="tag loan">In prestito</span>' : ''}
+  </button>`;
+}
+
+function spineHtml(b) {
+  const color = bookColor(b);
+  const width = Math.max(26, Math.min(64, 18 + Math.round((Number(b.pages) || 200) / 9)));
+  const height = 172 + (hashOf(b.title || '') % 44);
+  return `<button class="spine" data-id="${esc(b.id)}" aria-label="${esc(b.title || 'Senza titolo')}" style="width:${width}px;height:${height}px;background:${color};color:${inkOn(color)}"><span>${esc(b.title || 'Senza titolo')}</span></button>`;
+}
+
+/* Scaffale: una mensola per genere, per stanza o per persona. Nei desideri, una per lista. */
+function shelvesHtml(books, wish) {
+  const empty = wish ? '' : shelfSort === 'room' ? 'Senza posto' : shelfSort === 'owner' ? 'Di casa' : 'Senza genere';
+  const keysOf = (b) => {
+    if (wish) return [b.list];
+    if (shelfSort === 'room') return [b.shelf || empty];
+    if (shelfSort === 'owner') return ownersOf(b).length ? ownersOf(b) : [empty];
+    return [(b.genres || [])[0] || empty];
+  };
+  const groups = new Map();
+  for (const b of books) for (const k of keysOf(b)) groups.set(k, [...(groups.get(k) || []), b]);
+  const labels = [...groups.keys()].sort((a, b) => (a === empty) - (b === empty) || a.localeCompare(b, 'it'));
+  return labels.map((label) => `<section>
+    <h3 class="shelf-label">${esc(label)} · ${groups.get(label).length}</h3>
+    <div class="shelf-row">${groups.get(label).map(spineHtml).join('')}</div>
+    <div class="plank"></div>
+  </section>`).join('');
 }
 
 function matchesFilter(b) {
@@ -463,8 +573,15 @@ function renderList() {
   } else if (!books.length) {
     $('list').innerHTML = '<div class="empty"><strong>Nessun libro trovato</strong>Prova a cambiare ricerca o filtro.</div>';
   } else {
-    $('list').innerHTML = books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
+    $('list').innerHTML = viewKind === 'grid' ? books.map(gridCellHtml).join('')
+      : viewKind === 'shelf' ? shelvesHtml(books, wish)
+      : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
   }
+  const showing = total && books.length;
+  $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid' : showing && viewKind === 'shelf' ? ' shelves' : '');
+  for (const kind of ['grid', 'list', 'shelf']) $('view-' + kind).classList.toggle('on', viewKind === kind);
+  $('shelf-sort').hidden = viewKind !== 'shelf' || wish;
+  for (const b of document.querySelectorAll('#shelf-sort [data-sort]')) b.classList.toggle('on', b.dataset.sort === shelfSort);
 }
 
 /* Se una copertina non si carica, al suo posto compare l'iniziale del titolo. */
@@ -517,6 +634,20 @@ function openBook(book, opts = {}) {
 function renderFormCover() {
   $('f-cover-view').outerHTML = coverHtml({ title: $('f-title').value, cover: current.book.cover }, true).replace('class="cover big"', 'class="cover big" id="f-cover-view"');
   $('f-cover-remove').hidden = !current.book.cover;
+  // La scheda prende il colore della copertina.
+  const b = current.book;
+  const fallback = bookColor({ title: $('f-title').value, isbn: b.isbn });
+  tintBook(b.cover && b.color && b.colorFor === coverKey(b) ? b.color : fallback);
+  if (b.cover && b.colorFor !== coverKey(b)) {
+    const cover = b.cover;
+    extractColor(cover).then((color) => {
+      if (!current || current.book !== b || b.cover !== cover) return;
+      b.color = color;
+      b.colorFor = coverKey(b);
+      if (color) tintBook(color);
+    });
+  }
+  if (!b.cover) { b.color = ''; b.colorFor = ''; }
 }
 
 function renderFormOwners() {
@@ -598,6 +729,7 @@ function saveBook() {
   }
   if (!saveState()) return false;
   renderList();
+  refreshColors();
   return true;
 }
 
@@ -1078,8 +1210,26 @@ function init() {
   });
   $('tab-library').addEventListener('click', () => { viewMode = 'library'; renderList(); });
   $('tab-wish').addEventListener('click', () => { viewMode = 'wish'; renderList(); });
+  for (const kind of ['grid', 'list', 'shelf']) {
+    $('view-' + kind).addEventListener('click', () => { viewKind = kind; setPref('libreria.view', kind); renderList(); });
+  }
+  $('shelf-sort').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-sort]');
+    if (!btn) return;
+    shelfSort = btn.dataset.sort;
+    setPref('libreria.shelfSort', shelfSort);
+    renderList();
+  });
+  $('theme-seg').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-theme-set]');
+    if (!btn) return;
+    setPref('libreria.theme', btn.dataset.themeSet);
+    applyTheme(btn.dataset.themeSet);
+  });
+  applyTheme(pref('libreria.theme', 'night'));
+  refreshColors();
   $('list').addEventListener('click', (e) => {
-    const row = e.target.closest('.book');
+    const row = e.target.closest('[data-id]');
     const book = row && state.books.find((b) => b.id === row.dataset.id);
     if (book) openBook(book);
   });

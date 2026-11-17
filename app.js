@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 32;
+const APP_VERSION = 33;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -392,7 +392,8 @@ function pref(key, fallback) { try { return localStorage.getItem(key) || fallbac
 function setPref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* si resta sul valore in memoria */ } }
 
 let viewKind = pref('libreria.view', 'grid');      // 'grid' copertine, 'list' lista, 'shelf' scaffale
-let shelfSort = pref('libreria.shelfSort', 'genre'); // 'genre', 'room', 'owner'
+let flatView = pref('libreria.flatView', 'grid');   // la vista a cui si torna uscendo dallo scaffale
+let shelfSort = pref('libreria.shelfSort', 'room'); // 'genre', 'room', 'owner'
 let gridZoom = Number(pref('libreria.zoom', '1')) || 1; // 1 copertine grandi, 2 medie, 3 piccole
 let lastAddedId = '';
 
@@ -743,7 +744,11 @@ function renderList() {
   // Il pulsante dice a parole la vista attuale; toccandolo si apre l'elenco delle tre viste.
   $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>' + VIEWS[viewKind][0]
     + '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
-  $('view-menu').innerHTML = Object.keys(VIEWS).map((k) => `<button data-view="${k}" class="${k === viewKind ? 'on' : ''}">
+  $('view-cycle').hidden = viewKind === 'shelf';
+  $('btn-shelf').classList.toggle('on', viewKind === 'shelf');
+  $('btn-shelf').setAttribute('aria-pressed', viewKind === 'shelf');
+  $('btn-shelf').setAttribute('aria-label', viewKind === 'shelf' ? 'Chiudi lo scaffale' : 'Scaffale');
+  $('view-menu').innerHTML = ['grid', 'list'].map((k) => `<button data-view="${k}" class="${k === viewKind ? 'on' : ''}">
       <svg viewBox="0 0 24 24" aria-hidden="true">${VIEWS[k][1]}</svg>
       <span><b>${VIEWS[k][0]}</b><small>${VIEWS[k][2]}</small></span>
     </button>`).join('');
@@ -1639,6 +1644,8 @@ function init() {
     const btn = e.target.closest('[data-view]');
     if (!btn) return;
     viewKind = btn.dataset.view;
+    flatView = viewKind;
+    setPref('libreria.flatView', flatView);
     setPref('libreria.view', viewKind);
     closeViewMenu();
     renderList();
@@ -1667,6 +1674,14 @@ function init() {
     const el = e.target.closest('[data-id]');
     const book = el && state.books.find((b) => b.id === el.dataset.id);
     if (book) openView(book);
+  });
+  // Scaffale: un tocco lo apre, un secondo tocco riporta alla vista di prima (copertine o lista).
+  $('btn-shelf').addEventListener('click', () => {
+    if (viewKind === 'shelf') viewKind = flatView;
+    else { flatView = viewKind; setPref('libreria.flatView', flatView); viewKind = 'shelf'; }
+    setPref('libreria.view', viewKind);
+    renderList();
+    window.scrollTo(0, 0);
   });
   $('btn-search').addEventListener('click', () => {
     const tools = $('tools');

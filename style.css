@@ -477,3 +477,9 @@ button.tag:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px
 .grouped.z3 .grid-in { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 12px 10px; }
 .list.grouped .cell .cell-cover:has(img) { padding: 0; background: none !important; }
 .rows-in .book:last-child { border-bottom: 0; }
+
+/* ---------- Scaffale in alto, tra la lente e le impostazioni ---------- */
+.top .icon-btn { width: 42px; height: 42px; }
+.top-row, .top-actions { gap: 8px; }
+.top h1 { font-size: 19px; }
+.icon-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }

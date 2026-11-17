@@ -298,3 +298,43 @@ h1 { font-size: 28px; }
 .top h1 { font-size: 23px; white-space: nowrap; }
 .top-row { align-items: center; }
 .spine { align-items: flex-start; }
+
+/* ---------- Versione 11: testata che si ritira, zoom, scheda da leggere ---------- */
+.top { transition: transform .2s ease; }
+.top.away { transform: translateY(-100%); }
+@media (prefers-reduced-motion: reduce) { .top { transition: none; } }
+.tabs { margin-top: 10px; }
+.list.grid { touch-action: pan-y; }
+.list.grid.z2 { grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 16px 12px; }
+.list.grid.z3 { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 12px 10px; }
+.z2 .cell-title { font-size: 12px; }
+.z3 .cell-title, .z3 .ph-author, .z3 .cell .tag { display: none; }
+.z2 .cell-cover, .z3 .cell-cover { padding: 6px; }
+.z2 .ph-title { font-size: 11px; }
+.z3 .ph-title { font-size: 9px; }
+@media (prefers-reduced-motion: no-preference) {
+  .cell.new .cell-cover, .book.new .cover { animation: pop .5s ease-out; }
+  @keyframes pop { from { transform: scale(.6); opacity: .3; } 60% { transform: scale(1.06); } to { transform: none; opacity: 1; } }
+}
+.toast-cover { width: 34px; height: 50px; object-fit: cover; border-radius: 3px; flex: 0 0 auto; }
+.toast span { flex: 1; }
+
+#view .sheet-head { background: color-mix(in srgb, var(--book) 26%, var(--bg)); border-bottom-color: transparent; }
+.hero { margin: -16px -16px 0; padding: 8px 16px 20px; background: color-mix(in srgb, var(--book) 26%, var(--bg)); display: grid; gap: 16px; }
+.hero-main { display: flex; gap: 16px; align-items: flex-end; }
+.hero-main .cover.big { width: 124px; height: 186px; }
+.hero-text { display: grid; gap: 6px; min-width: 0; padding-bottom: 4px; }
+.hero-text h2 { text-align: left; font-size: 26px; line-height: 1.1; overflow-wrap: anywhere; }
+.hero-author { font-size: 16px; color: var(--muted); }
+.hero-stars { font-size: 20px; letter-spacing: 2px; color: color-mix(in srgb, var(--book) 55%, var(--ink)); }
+.hero-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.hero-tags .tag { background: var(--surface); padding: 5px 12px; font-size: 14px; }
+.facts { margin: 6px 0 0; }
+.facts div { display: flex; justify-content: space-between; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+.view-label { font: 600 13px/1 var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 22px 0 8px; }
+.view-comment { font: 500 18px/1.45 var(--font-display); white-space: pre-wrap; }
+.view-actions { display: grid; gap: 10px; margin-top: 24px; }
+#view .btn.primary { background: var(--book); color: var(--book-ink); }
+#view .cover.big, #book .cover.big { background: var(--book); color: var(--book-ink); }

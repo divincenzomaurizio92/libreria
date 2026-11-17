@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -36,7 +36,8 @@ const DEFAULT_WISHLISTS = ['Lista Elena', 'Lista Maurizio', 'Regali', 'Tommaso']
 
 const DEFAULT_OWNERS = ['Elena', 'Maurizio', 'Tommaso'];
 
-let state = { books: [], genres: [...DEFAULT_GENRES], wishlists: [...DEFAULT_WISHLISTS], owners: [...DEFAULT_OWNERS] };
+/* places = mobili e librerie di casa. Ogni libro ha "shelf" (il mobile) e "shelfRow" (il ripiano, facoltativo). */
+let state = { books: [], genres: [...DEFAULT_GENRES], wishlists: [...DEFAULT_WISHLISTS], owners: [...DEFAULT_OWNERS], places: [] };
 
 function loadState() {
   try {
@@ -47,6 +48,9 @@ function loadState() {
       state.genres = Array.isArray(data.genres) && data.genres.length ? data.genres : [...DEFAULT_GENRES];
       state.wishlists = Array.isArray(data.wishlists) ? data.wishlists : [...DEFAULT_WISHLISTS];
       state.owners = Array.isArray(data.owners) ? data.owners : [...DEFAULT_OWNERS];
+      state.places = Array.isArray(data.places) ? data.places : [];
+      // Le posizioni scritte a mano nelle versioni precedenti diventano mobili.
+      for (const b of state.books) if (b.shelf && !state.places.includes(b.shelf)) state.places.push(b.shelf);
     }
   } catch (e) {
     console.warn('Lettura dei dati non riuscita', e);
@@ -367,6 +371,21 @@ function setPref(key, value) { try { localStorage.setItem(key, value); } catch (
 
 let viewKind = pref('libreria.view', 'grid');      // 'grid' copertine, 'list' lista, 'shelf' scaffale
 let shelfSort = pref('libreria.shelfSort', 'genre'); // 'genre', 'room', 'owner'
+let gridZoom = Number(pref('libreria.zoom', '1')) || 1; // 1 copertine grandi, 2 medie, 3 piccole
+let lastAddedId = '';
+
+const VIEWS = {
+  grid: ['Copertine', '<rect x="4" y="4" width="6" height="7"/><rect x="14" y="4" width="6" height="7"/><rect x="4" y="14" width="6" height="7"/><rect x="14" y="14" width="6" height="7"/>'],
+  list: ['Lista', '<path d="M4 6h16M4 12h16M4 18h16"/>'],
+  shelf: ['Scaffale', '<path d="M5 4v14M9 6v12M13 4v14M17 8v10M3 20h18"/>'],
+};
+
+function setZoom(z) {
+  gridZoom = Math.max(1, Math.min(3, z));
+  setPref('libreria.zoom', String(gridZoom));
+  for (const b of document.querySelectorAll('[data-zoom]')) b.classList.toggle('on', Number(b.dataset.zoom) === gridZoom);
+  renderList();
+}
 
 function applyTheme(theme) {
   const t = theme === 'day' ? 'day' : 'night';
@@ -427,8 +446,10 @@ async function refreshColors() {
 }
 
 function tintBook(color) {
-  $('book').style.setProperty('--book', color);
-  $('book').style.setProperty('--book-ink', inkOn(color));
+  for (const id of ['book', 'view']) {
+    $(id).style.setProperty('--book', color);
+    $(id).style.setProperty('--book-ink', inkOn(color));
+  }
 }
 
 /* ================= 5. ELENCO DEI LIBRI ================= */
@@ -474,7 +495,7 @@ function gridCellHtml(b) {
   const inner = b.cover
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-author">${esc(firstAuthor(b.authors))}</span><span class="ph-title">${esc(b.title || 'Senza titolo')}</span>`;
-  return `<button class="cell" data-id="${esc(b.id)}">
+  return `<button class="cell${b.id === lastAddedId ? ' new' : ''}" data-id="${esc(b.id)}">
     <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.loanTo ? '<span class="tag loan">In prestito</span>' : ''}
@@ -493,7 +514,7 @@ function shelvesHtml(books, wish) {
   const empty = wish ? '' : shelfSort === 'room' ? 'Senza posto' : shelfSort === 'owner' ? 'Di casa' : 'Senza genere';
   const keysOf = (b) => {
     if (wish) return [b.list];
-    if (shelfSort === 'room') return [b.shelf || empty];
+    if (shelfSort === 'room') return [b.shelf ? b.shelf + (b.shelfRow ? ' · ripiano ' + b.shelfRow : '') : empty];
     if (shelfSort === 'owner') return ownersOf(b).length ? ownersOf(b) : [empty];
     return [(b.genres || [])[0] || empty];
   };
@@ -578,8 +599,9 @@ function renderList() {
       : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('');
   }
   const showing = total && books.length;
-  $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid' : showing && viewKind === 'shelf' ? ' shelves' : '');
-  for (const kind of ['grid', 'list', 'shelf']) $('view-' + kind).classList.toggle('on', viewKind === kind);
+  $('list').className = 'list' + (showing && viewKind === 'grid' ? ' grid z' + gridZoom : showing && viewKind === 'shelf' ? ' shelves' : '');
+  $('view-cycle').innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VIEWS[viewKind][1] + '</svg>';
+  $('view-cycle').setAttribute('aria-label', 'Vista: ' + VIEWS[viewKind][0] + '. Tocca per cambiare');
   $('shelf-sort').hidden = viewKind !== 'shelf' || wish;
   for (const b of document.querySelectorAll('#shelf-sort [data-sort]')) b.classList.toggle('on', b.dataset.sort === shelfSort);
 }
@@ -590,11 +612,56 @@ document.addEventListener('error', (e) => {
   if (el && el.tagName === 'IMG' && el.dataset.initial && el.parentNode) el.parentNode.textContent = el.dataset.initial;
 }, true);
 
+/* ================= SCHEDA DA LEGGERE ================= */
+
+let viewId = '';
+const itDate = (d) => { const t = new Date(d); return isNaN(t) ? d : t.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' }); };
+
+function openView(book) {
+  renderView(book);
+  show('view');
+  $('view-body').scrollTop = 0;
+}
+
+function renderView(b) {
+  viewId = b.id;
+  tintBook(bookColor(b));
+  const tags = [...(b.list ? [b.list] : []), ...(b.genres || []), ...ownersOf(b).map((o) => 'Di ' + o),
+    ...(b.shelf ? [b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : '')] : [])];
+  const facts = [
+    ['Casa editrice', b.publisher], ['Anno di questa edizione', b.year], ['Pagine', b.pages],
+    ['Serie', b.series ? b.series + (b.seriesNum ? ', n. ' + b.seriesNum : '') : ''],
+    ['Comprato il', b.boughtAt ? itDate(b.boughtAt) : ''], ['Prezzo', b.price ? Number(b.price).toFixed(2).replace('.', ',') + ' €' : ''],
+    ['ISBN', b.isbn],
+  ].filter(([, v]) => v);
+  const links = storeLinks(b);
+  $('view-body').innerHTML = `
+    <div class="hero">
+      <div class="hero-main">
+        ${coverHtml(b, true)}
+        <div class="hero-text">
+          <h2>${esc(b.title || 'Senza titolo')}</h2>
+          ${b.authors ? `<span class="hero-author">${esc(b.authors)}</span>` : ''}
+          ${b.rating ? `<span class="hero-stars" role="img" aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
+        </div>
+      </div>
+      ${tags.length ? `<div class="hero-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+    </div>
+    ${b.loanTo ? `<p class="banner" style="margin-top:16px">In prestito a ${esc(b.loanTo)}${b.loanDate ? ' dal ' + esc(itDate(b.loanDate)) : ''}.</p>` : ''}
+    ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
+    ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
+    ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
+    <div class="view-actions">
+      ${b.loanTo ? '<button class="btn primary wide" data-act="returned">È tornato a casa</button>' : ''}
+      ${b.list ? '<button class="btn primary wide" data-act="bought">Comprato: sposta in libreria</button>' : ''}
+    </div>`;
+}
+
 /* ================= 6. SCHEDA LIBRO ================= */
 
 let current = null; // { book, isNew, selected:Set }
 
-const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'shelf', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
+const FIELDS = ['title', 'authors', 'publisher', 'pages', 'year', 'isbn', 'notes', 'shelfRow', 'series', 'seriesNum', 'boughtAt', 'price', 'loanTo', 'loanDate'];
 
 function openBook(book, opts = {}) {
   const isNew = !book.id;
@@ -609,7 +676,9 @@ function openBook(book, opts = {}) {
   $('f-loan-back').hidden = isNew || !book.loanTo;
   // Suggerimenti: posizioni e serie già usate.
   const options = (key) => [...new Set(state.books.map((b) => b[key]).filter(Boolean))].sort().map((v) => `<option value="${esc(v)}">`).join('');
-  $('shelf-options').innerHTML = options('shelf');
+  current.place = book.shelf || '';
+  $('f-place-new').value = '';
+  renderFormPlaces();
   $('series-options').innerHTML = options('series');
   renderFormOwners();
   renderFormRating();
@@ -648,6 +717,22 @@ function renderFormCover() {
     });
   }
   if (!b.cover) { b.color = ''; b.colorFor = ''; }
+}
+
+function renderFormPlaces() {
+  $('f-places').innerHTML = state.places.length
+    ? state.places.map((p) => `<button type="button" class="chip${current.place === p ? ' on' : ''}" data-place="${esc(p)}" aria-pressed="${current.place === p}">${esc(p)}</button>`).join('')
+    : '<span class="hint">Aggiungi il primo mobile qui sotto: lo ritroverai in tutte le schede.</span>';
+}
+
+function addPlace(name) {
+  name = name.trim().replace(/\s+/g, ' ');
+  if (!name) return '';
+  const existing = state.places.find((p) => p.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
+  state.places.push(name);
+  saveState();
+  return name;
 }
 
 function renderFormOwners() {
@@ -703,6 +788,8 @@ function readForm() {
   b.isbn = toIsbn13(b.isbn) || cleanIsbn(b.isbn);
   b.genres = state.genres.filter((g) => current.selected.has(g));
   b.list = current.list || '';
+  b.shelf = current.place || '';
+  if (!b.shelf) b.shelfRow = '';
   b.owners = state.owners.filter((o) => current.owners.has(o));
   delete b.owner;
   b.rating = current.rating || 0;
@@ -728,8 +815,11 @@ function saveBook() {
     if (i >= 0) state.books[i] = b;
   }
   if (!saveState()) return false;
+  if (current.isNew) { lastAddedId = b.id; setTimeout(() => { lastAddedId = ''; }, 1500); }
   renderList();
   refreshColors();
+  if (!$('view').hidden) renderView(b);
+  toast(b.list ? 'Salvato in «' + b.list + '»' : current.isNew ? 'Aggiunto in libreria' : 'Salvato', null, null, b.cover);
   return true;
 }
 
@@ -1056,7 +1146,7 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Posizione'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
+  const cols = [['title', 'Titolo'], ['authors', 'Autore'], ['publisher', 'Casa editrice'], ['year', 'Anno'], ['pages', 'Pagine'], ['genres', 'Genere'], ['isbn', 'ISBN'], ['list', 'Lista'], ['owners', 'Di chi è'], ['rating', 'Voto'], ['notes', 'Commento'], ['shelf', 'Mobile'], ['shelfRow', 'Ripiano'], ['series', 'Serie'], ['seriesNum', 'Numero'], ['boughtAt', 'Comprato il'], ['price', 'Prezzo'], ['loanTo', 'Prestato a'], ['loanDate', 'Prestato dal']];
   const cell = (v) => '"' + String(Array.isArray(v) ? v.join(', ') : v ?? '').replace(/"/g, '""') + '"';
   const rows = [cols.map((c) => cell(c[1])).join(';')].concat(state.books.map((b) => cols.map((c) => cell(c[0] === 'list' ? (b.list || 'Libreria') : c[0] === 'owners' ? ownersOf(b) : b[c[0]])).join(';')));
   download('libreria-' + today() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
@@ -1077,6 +1167,8 @@ async function restoreBackup(file) {
     for (const g of data.genres || []) if (typeof g === 'string' && !state.genres.includes(g)) state.genres.push(g);
     for (const l of data.wishlists || []) if (typeof l === 'string' && !state.wishlists.includes(l)) state.wishlists.push(l);
     for (const b of state.books) if (b.list && !state.wishlists.includes(b.list)) state.wishlists.push(b.list);
+    for (const p of data.places || []) if (typeof p === 'string' && !state.places.includes(p)) state.places.push(p);
+    for (const b of state.books) if (b.shelf && !state.places.includes(b.shelf)) state.places.push(b.shelf);
     for (const o of data.owners || []) if (typeof o === 'string' && !state.owners.includes(o)) state.owners.push(o);
     saveState();
     renderList();
@@ -1093,6 +1185,13 @@ function renderSettings() {
     + ' su questo telefono. Per ora i dati restano solo qui: scarica un backup ogni tanto.';
   $('app-version').textContent = 'Versione ' + APP_VERSION;
   $('gkey').value = googleKey();
+  $('place-list').innerHTML = state.places.map((p, i) => {
+    const used = state.books.filter((b) => b.shelf === p).length;
+    return `<div class="genre-item">
+      <input type="text" id="place-${i}" value="${esc(p)}" data-place-index="${i}" aria-label="Nome del mobile">
+      <button class="btn ghost" data-place-del="${i}" ${used ? 'disabled' : ''} aria-label="Elimina ${esc(p)}">${used ? used + (used === 1 ? ' libro' : ' libri') : 'Elimina'}</button>
+    </div>`;
+  }).join('');
   $('wish-list').innerHTML = state.wishlists.map((l, i) => {
     const used = state.books.filter((b) => b.list === l).length;
     return `<div class="genre-item">
@@ -1107,6 +1206,20 @@ function renderSettings() {
       <button class="btn ghost" data-genre-del="${i}" aria-label="Elimina ${esc(g)}">${used ? 'Elimina (' + used + ')' : 'Elimina'}</button>
     </div>`;
   }).join('');
+}
+
+function renamePlace(i, name) {
+  const old = state.places[i];
+  name = name.trim().replace(/\s+/g, ' ');
+  if (!name || name === old) return renderSettings();
+  const clash = state.places.findIndex((p, j) => j !== i && p.toLowerCase() === name.toLowerCase());
+  const target = clash >= 0 ? state.places[clash] : name;
+  for (const b of state.books) if (b.shelf === old) b.shelf = target;
+  if (clash >= 0) state.places.splice(i, 1); else state.places[i] = name;
+  saveState();
+  renderSettings();
+  renderList();
+  toast(clash >= 0 ? '«' + old + '» unito a «' + target + '».' : 'Mobile rinominato.');
 }
 
 function renameWishlist(i, name) {
@@ -1179,9 +1292,9 @@ function show(id) { $(id).hidden = false; }
 function hide(id) { $(id).hidden = true; }
 
 let toastTimer = null;
-function toast(text, actionLabel, action) {
+function toast(text, actionLabel, action, cover) {
   const el = $('toast');
-  el.innerHTML = `<span>${esc(text)}</span>`;
+  el.innerHTML = (cover ? `<img class="toast-cover" src="${esc(cover)}" alt="" referrerpolicy="no-referrer">` : '') + `<span>${esc(text)}</span>`;
   if (actionLabel) {
     const btn = document.createElement('button');
     btn.textContent = actionLabel;
@@ -1210,9 +1323,83 @@ function init() {
   });
   $('tab-library').addEventListener('click', () => { viewMode = 'library'; renderList(); });
   $('tab-wish').addEventListener('click', () => { viewMode = 'wish'; renderList(); });
-  for (const kind of ['grid', 'list', 'shelf']) {
-    $('view-' + kind).addEventListener('click', () => { viewKind = kind; setPref('libreria.view', kind); renderList(); });
-  }
+  $('view-cycle').addEventListener('click', () => {
+    const kinds = Object.keys(VIEWS);
+    viewKind = kinds[(kinds.indexOf(viewKind) + 1) % kinds.length];
+    setPref('libreria.view', viewKind);
+    renderList();
+    toast('Vista: ' + VIEWS[viewKind][0]);
+  });
+  $('btn-search').addEventListener('click', () => {
+    const tools = $('tools');
+    tools.hidden = !tools.hidden;
+    if (!tools.hidden) $('search').focus();
+    else if ($('search').value) { $('search').value = ''; renderList(); }
+  });
+  $('zoom-seg').addEventListener('click', (e) => { const b = e.target.closest('[data-zoom]'); if (b) setZoom(Number(b.dataset.zoom)); });
+  for (const b of document.querySelectorAll('[data-zoom]')) b.classList.toggle('on', Number(b.dataset.zoom) === gridZoom);
+
+  // Due dita sulla griglia: avvicinandole le copertine rimpiccioliscono, allontanandole ingrandiscono.
+  let pinch = null;
+  const spread = (e) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  $('list').addEventListener('touchstart', (e) => { pinch = e.touches.length === 2 && viewKind === 'grid' ? { start: spread(e), done: false } : null; }, { passive: true });
+  $('list').addEventListener('touchmove', (e) => {
+    if (!pinch || pinch.done || e.touches.length !== 2) return;
+    const ratio = spread(e) / pinch.start;
+    if (ratio > 1.25) { pinch.done = true; setZoom(gridZoom - 1); }
+    else if (ratio < 0.8) { pinch.done = true; setZoom(gridZoom + 1); }
+  }, { passive: true });
+  $('list').addEventListener('touchend', () => { pinch = null; }, { passive: true });
+
+  // La testata si ritira scorrendo verso il basso e torna risalendo.
+  let lastY = 0;
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    const top = document.querySelector('.top');
+    if (y > lastY + 6 && y > 140) top.classList.add('away');
+    else if (y < lastY - 6 || y < 60) top.classList.remove('away');
+    lastY = y;
+  }, { passive: true });
+
+  // Scheda da leggere
+  $('view-close').addEventListener('click', () => hide('view'));
+  $('view-edit').addEventListener('click', () => { const b = state.books.find((x) => x.id === viewId); if (b) openBook(b); });
+  $('view-body').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act]');
+    const b = btn && state.books.find((x) => x.id === viewId);
+    if (!b) return;
+    if (btn.dataset.act === 'returned') { b.loanTo = ''; b.loanDate = ''; }
+    if (btn.dataset.act === 'bought') b.list = '';
+    b.updatedAt = Date.now();
+    saveState();
+    renderList();
+    renderView(b);
+    toast(btn.dataset.act === 'bought' ? 'Spostato in libreria' : 'Segnato come tornato a casa');
+  });
+
+  // Mobili e librerie
+  $('f-places').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    current.place = current.place === chip.dataset.place ? '' : chip.dataset.place;
+    renderFormPlaces();
+  });
+  const addFormPlace = () => { const p = addPlace($('f-place-new').value); if (!p) return; current.place = p; $('f-place-new').value = ''; renderFormPlaces(); };
+  $('f-place-add').addEventListener('click', addFormPlace);
+  $('f-place-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFormPlace(); } });
+  $('place-list').addEventListener('change', (e) => { if (e.target.dataset.placeIndex !== undefined) renamePlace(Number(e.target.dataset.placeIndex), e.target.value); });
+  $('place-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-place-del]');
+    if (!btn) return;
+    const i = Number(btn.dataset.placeDel);
+    if (state.books.some((b) => b.shelf === state.places[i])) return;
+    state.places.splice(i, 1);
+    saveState();
+    renderSettings();
+  });
+  const addSettingsPlace = () => { if (addPlace($('place-new').value)) { $('place-new').value = ''; renderSettings(); } };
+  $('place-add').addEventListener('click', addSettingsPlace);
+  $('place-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') addSettingsPlace(); });
   $('shelf-sort').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-sort]');
     if (!btn) return;
@@ -1231,7 +1418,7 @@ function init() {
   $('list').addEventListener('click', (e) => {
     const row = e.target.closest('[data-id]');
     const book = row && state.books.find((b) => b.id === row.dataset.id);
-    if (book) openBook(book);
+    if (book) openView(book);
   });
 
   // Scanner
@@ -1240,7 +1427,7 @@ function init() {
   $('scan-mode-add').addEventListener('click', () => setScanMode('add'));
   $('scan-mode-check').addEventListener('click', () => setScanMode('check'));
   $('scan-again').addEventListener('click', () => setScanMode('check'));
-  $('scan-open').addEventListener('click', () => { const b = scan.found; closeScanner(); if (b) openBook(b); });
+  $('scan-open').addEventListener('click', () => { const b = scan.found; closeScanner(); if (b) openView(b); });
   $('scan-wish').addEventListener('click', async () => {
     const isbn = scan.isbn;
     closeScanner();
@@ -1271,11 +1458,11 @@ function init() {
   });
   $('book-close').addEventListener('click', () => hide('book'));
   $('book-save').addEventListener('click', () => {
-    if (saveBook()) { hide('book'); toast(current.book.list ? 'Salvato in «' + current.book.list + '».' : 'Salvato in libreria.'); }
+    if (saveBook()) hide('book');
   });
   $('book-bought').addEventListener('click', () => {
     current.list = '';
-    if (saveBook()) { hide('book'); toast('Spostato in libreria.'); }
+    if (saveBook()) hide('book');
   });
   $('f-owners').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
@@ -1305,7 +1492,7 @@ function init() {
   $('f-loan-back').addEventListener('click', () => {
     $('f-loanTo').value = '';
     $('f-loanDate').value = '';
-    if (saveBook()) { hide('book'); toast('Segnato come tornato a casa.'); }
+    if (saveBook()) hide('book');
   });
   $('f-lists').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
@@ -1332,6 +1519,7 @@ function init() {
     saveState();
     renderList();
     hide('book');
+    hide('view');
     toast('«' + (removed.title || 'Libro') + '» eliminato.', 'Annulla', () => {
       state.books.splice(i, 0, removed);
       saveState();

@@ -44,8 +44,8 @@ async function syncNow() {
   syncing = true;
   setCloudStatus('busy', 'Sincronizzo…');
   try {
-    const changedLocally = await pullBooks();
-    await syncSettings();
+    let changedLocally = await pullBooks();
+    if (await syncSettings()) changedLocally = true;
     await pushBooks();
     cloud.lastSync = Date.now();
     saveSyncState();
@@ -122,32 +122,55 @@ async function pushBooks() {
   }
 }
 
-/* Generi, liste, persone e mobili: vince l'ultima modifica, unendo i nomi così non se ne perde nessuno. */
+/* Generi, liste desideri, persone e mobili.
+   Si confronta ogni telefono con l'ultima versione sincronizzata («base»): ciò che è stato aggiunto
+   da una parte si aggiunge, ciò che è stato tolto o rinominato da una parte sparisce anche dall'altra.
+   Così una lista eliminata su un telefono non ricompare dall'altro. */
+const SETTINGS_KEYS = ['genres', 'wishlists', 'owners', 'places'];
 async function syncSettings() {
   const { data, error } = await sb.from('libreria_libraries').select('settings,settings_at').eq('id', cloud.lib).single();
   if (error) throw error;
-  const local = settingsSig();
-  const localChanged = local !== cloud.settingsSig;
   const remote = data.settings || {};
-  const remoteNewer = Number(data.settings_at) > (cloud.settingsAt || 0);
-  if (remoteNewer && Object.keys(remote).length) {
-    for (const k of ['genres', 'wishlists', 'owners', 'places']) {
-      if (!Array.isArray(remote[k])) continue;
-      const extra = localChanged ? (state[k] || []).filter((x) => !remote[k].includes(x)) : [];
-      state[k] = [...remote[k], ...extra];
+  const local = settingsOf();
+  const hasRemote = SETTINGS_KEYS.some((k) => Array.isArray(remote[k]));
+  let merged;
+  if (!hasRemote) {
+    merged = local;                                   // primo telefono: la sua configurazione diventa quella di tutti
+  } else if (!cloud.settingsBase) {
+    // Telefono già sincronizzato con la versione precedente dell'app (che univa tutto): vale quella online.
+    merged = cloud.settingsSig ? remote : null;
+    if (!merged) {                                    // primo accesso di questo telefono: si uniscono le due
+      merged = {};
+      for (const k of SETTINGS_KEYS) { const R = remote[k] || []; merged[k] = [...R, ...(local[k] || []).filter((x) => !R.includes(x))]; }
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    cloud.settingsAt = Number(data.settings_at);
-    cloud.settingsSig = settingsSig();
-    if (!localChanged) return;
+  } else {
+    merged = {};
+    for (const k of SETTINGS_KEYS) {
+      const R = Array.isArray(remote[k]) ? remote[k] : [], L = local[k] || [], B = cloud.settingsBase[k] || [];
+      const removed = B.filter((x) => !L.includes(x));
+      const added = L.filter((x) => !B.includes(x) && !R.includes(x));
+      merged[k] = [...R.filter((x) => !removed.includes(x)), ...added];
+    }
   }
-  if (localChanged || !Object.keys(remote).length) {
+  for (const k of SETTINGS_KEYS) merged[k] = Array.isArray(merged[k]) ? merged[k] : (local[k] || []);
+  const mergedSig = JSON.stringify(merged);
+  if (mergedSig !== JSON.stringify(local)) {
+    for (const k of SETTINGS_KEYS) state[k] = merged[k];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (!$('settings').hidden) renderSettings();
+  }
+  const remoteSig = JSON.stringify(SETTINGS_KEYS.reduce((o, k) => ((o[k] = remote[k] || []), o), {}));
+  if (!hasRemote || mergedSig !== remoteSig) {
     const at = Date.now();
-    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: settingsOf(), settings_at: at }).eq('id', cloud.lib);
+    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: merged, settings_at: at }).eq('id', cloud.lib);
     if (e2) throw e2;
     cloud.settingsAt = at;
-    cloud.settingsSig = settingsSig();
+  } else {
+    cloud.settingsAt = Number(data.settings_at) || cloud.settingsAt;
   }
+  cloud.settingsBase = JSON.parse(mergedSig);
+  cloud.settingsSig = settingsSig();
+  return mergedSig !== JSON.stringify(local);
 }
 
 /* ---------- Accesso ---------- */

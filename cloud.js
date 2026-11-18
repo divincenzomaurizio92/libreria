@@ -1,4 +1,4 @@
-/* Libreria online: accesso con codice via email e sincronizzazione tra i telefoni.
+/* Libreria online: accesso con email e password e sincronizzazione tra i telefoni.
    I dati restano anche nella memoria del telefono: senza rete l'app funziona come prima,
    e quando la rete torna le modifiche partono da sole.
    La chiave qui sotto è quella pubblica del progetto: da sola non apre nulla,
@@ -9,7 +9,6 @@ const SYNC_KEY = 'libreria.sync';
 
 let sb = null;
 let cloudUser = null;
-let cloudPendingEmail = '';
 let cloud = loadSyncState();
 let syncTimer = null, syncing = false, syncAgain = false;
 let cloudStatus = { kind: 'off', text: '' }; // off | ok | busy | error | offline | denied
@@ -174,39 +173,25 @@ async function cloudJoin() {
   return true;
 }
 
-async function cloudSendCode() {
+/* Accesso con email e password: gli account li crea Maurizio dal pannello di Supabase. */
+async function cloudSignIn() {
   const email = $('cloud-email').value.trim().toLowerCase();
+  const password = $('cloud-pass').value;
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Scrivi un indirizzo email valido.');
-  const btn = $('cloud-send');
+  if (!password) return toast('Scrivi la password.');
+  const btn = $('cloud-login');
   btn.disabled = true;
-  btn.textContent = 'Invio…';
-  // shouldCreateUser: false → entra solo chi ha già un account sul progetto.
-  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
-  btn.disabled = false;
-  btn.textContent = 'Ricevi il codice';
-  if (error) {
-    const msg = /rate|too many|seconds/i.test(error.message) ? 'Troppe richieste ravvicinate: riprova tra qualche minuto.'
-      : /signups|not allowed|not found|user/i.test(error.message) ? 'Per questa email non c\'è ancora un account: chiedi a Maurizio di crearlo.'
-      : 'Invio non riuscito: ' + error.message;
-    return toast(msg);
-  }
-  cloudPendingEmail = email;
-  renderCloud();
-  setTimeout(() => { const c = $('cloud-code'); if (c) c.focus(); }, 50);
-}
-
-async function cloudVerify() {
-  const token = $('cloud-code').value.replace(/\D/g, '');
-  if (token.length < 6) return toast('Il codice ha 6 cifre: lo trovi nell\'email.');
-  const btn = $('cloud-verify');
-  btn.disabled = true;
-  btn.textContent = 'Controllo…';
-  const { data, error } = await sb.auth.verifyOtp({ email: cloudPendingEmail, token, type: 'email' });
+  btn.textContent = 'Entro…';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
   btn.disabled = false;
   btn.textContent = 'Entra';
-  if (error) return toast(/expired|invalid/i.test(error.message) ? 'Codice scaduto o sbagliato: chiedine uno nuovo.' : 'Accesso non riuscito: ' + error.message);
+  if (error) {
+    return toast(/invalid|credentials/i.test(error.message) ? 'Email o password sbagliate.'
+      : /confirm/i.test(error.message) ? 'Account non ancora confermato: chiedi a Maurizio di spuntare «Auto Confirm User».'
+      : /rate|too many/i.test(error.message) ? 'Troppi tentativi: riprova tra qualche minuto.'
+      : 'Accesso non riuscito: ' + error.message);
+  }
   cloudUser = data.user;
-  cloudPendingEmail = '';
   try {
     if (await cloudJoin()) { toast('Collegato: sincronizzo la libreria…'); await syncNow(); toast('Libreria sincronizzata.'); }
   } catch (e) { setCloudStatus('error', 'Collegato, ma la libreria non risponde: riprovo tra poco.'); scheduleSync(15000); }
@@ -230,14 +215,11 @@ function renderCloud() {
   if (!box) return;
   if (!sb) { box.innerHTML = '<p class="hint">La parte online non si è caricata: controlla la connessione e riapri l\'app.</p>'; return; }
   if (!cloudUser) {
-    box.innerHTML = cloudPendingEmail
-      ? `<p class="hint">Ti ho mandato un codice di 6 cifre a <b>${esc(cloudPendingEmail)}</b>. Controlla anche lo spam.</p>
-         <div class="row"><input id="cloud-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Codice" aria-label="Codice ricevuto per email">
-         <button class="btn primary" id="cloud-verify">Entra</button></div>
-         <button class="btn ghost wide" id="cloud-back">Cambia email</button>`
-      : `<p class="hint">Entra con la tua email: la libreria sarà la stessa su tutti i vostri telefoni, e resta anche senza internet.</p>
-         <div class="row"><input id="cloud-email" type="email" inputmode="email" autocomplete="email" placeholder="La tua email" aria-label="La tua email">
-         <button class="btn primary" id="cloud-send">Ricevi il codice</button></div>`;
+    box.innerHTML = `<p class="hint">Entra con la tua email e la tua password: la libreria sarà la stessa su tutti i vostri telefoni, e resta anche senza internet. Si fa una volta sola.</p>
+      <div class="field"><input id="cloud-email" type="email" inputmode="email" autocomplete="username" placeholder="La tua email" aria-label="La tua email"></div>
+      <div class="field"><input id="cloud-pass" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password"></div>
+      <button class="btn primary wide" id="cloud-login">Entra</button>
+      <p class="hint">Password dimenticata? Maurizio può cambiarla dal pannello di Supabase.</p>`;
     return;
   }
   const when = cloud.lastSync ? new Date(cloud.lastSync).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'mai';
@@ -254,16 +236,14 @@ function initCloud() {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'libreria.auth' },
   });
   $('cloud-box').addEventListener('click', (e) => {
-    if (e.target.closest('#cloud-send')) cloudSendCode();
-    else if (e.target.closest('#cloud-verify')) cloudVerify();
-    else if (e.target.closest('#cloud-back')) { cloudPendingEmail = ''; renderCloud(); }
+    if (e.target.closest('#cloud-login')) cloudSignIn();
     else if (e.target.closest('#cloud-sync')) syncNow();
     else if (e.target.closest('#cloud-out')) cloudSignOut();
   });
   $('cloud-box').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    if (e.target.id === 'cloud-email') cloudSendCode();
-    if (e.target.id === 'cloud-code') cloudVerify();
+    if (e.target.id === 'cloud-email') $('cloud-pass').focus();
+    if (e.target.id === 'cloud-pass') cloudSignIn();
   });
   sb.auth.getSession().then(async ({ data }) => {
     cloudUser = data.session ? data.session.user : null;

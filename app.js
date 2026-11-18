@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 48; // va tenuto uguale al numero in version.json
+const APP_VERSION = 49; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -70,6 +70,7 @@ function loadState() {
 function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (typeof scheduleSync === 'function') scheduleSync(); // e poco dopo parte verso la libreria online
     return true;
   } catch (e) {
     toast('Memoria del telefono piena: scarica un backup dalle impostazioni.');
@@ -1887,6 +1888,7 @@ function renderInstall() {
 
 function renderSettings() {
   renderInstall();
+  if (typeof renderCloud === 'function') renderCloud();
   const n = state.books.length;
   $('settings-info').textContent = (n === 1 ? '1 libro salvato' : n + ' libri salvati')
     + ' su questo telefono. Per ora i dati restano solo qui: scarica un backup ogni tanto.';

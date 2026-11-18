@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 50; // va tenuto uguale al numero in version.json
+const APP_VERSION = 51; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1205,8 +1205,12 @@ function renderFormRating() {
 }
 
 function renderFormLists() {
-  const chip = (value, label) => `<button type="button" class="chip${current.list === value ? ' on' : ''}" data-list="${esc(value)}" aria-pressed="${current.list === value}">${esc(label)}</button>`;
-  $('f-lists').innerHTML = chip('', 'In libreria') + state.wishlists.map((l) => chip(l, l)).join('');
+  // «In libreria» con l'icona dei libri; le liste desideri con un cuore, separate da una piccola scritta.
+  const ICON_BOOKS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h3v16H5zM10 4h3v16h-3zM15.2 5.2l2.9-.8 3.6 14.7-2.9.8z"/></svg>';
+  const ICON_HEART = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>';
+  const chip = (value, label, icon) => `<button type="button" class="chip place-chip${current.list === value ? ' on' : ''}" data-list="${esc(value)}" aria-pressed="${current.list === value}">${icon}${esc(label)}</button>`;
+  $('f-lists').innerHTML = chip('', 'In libreria', ICON_BOOKS)
+    + (state.wishlists.length ? '<span class="chips-sep">Desideri</span>' + state.wishlists.map((l) => chip(l, l, ICON_HEART)).join('') : '');
   // In lista desideri il cartaceo è quello che si vorrebbe: restano da indicare Kindle e Audible, se ci sono già.
   $('f-media-label').innerHTML = current.list ? 'Ce l\'ho già in versione <small>(facoltativo: il cartaceo è il desiderio)</small>' : 'Ce l\'ho in versione <small>(anche più di una)</small>';
   $('f-media').innerHTML = Object.keys(MEDIA).filter((k) => !(current.list && k === 'paper')).map((k) => `<button type="button" class="chip${current.media.has(k) ? ' on' : ''}" data-media="${k}" aria-pressed="${current.media.has(k)}">${MEDIA[k]}</button>`).join('');

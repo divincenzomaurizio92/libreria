@@ -710,3 +710,10 @@ body::before {
 .cloud-dot.offline { background: var(--muted); }
 @keyframes cloudpulse { to { opacity: .35; } }
 #cloud-box .row input { flex: 1; min-width: 0; }
+
+/* v51: Dove lo metto — libreria con i libri, desideri con il cuore */
+.place-chip { display: inline-flex; align-items: center; gap: 6px; }
+.place-chip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; flex: 0 0 auto; }
+.place-chip[data-list=""] svg { fill: currentColor; stroke: none; }
+.place-chip:not([data-list=""]).on svg { fill: currentColor; }
+.chips-sep { flex-basis: 100%; margin: 6px 0 -2px; font: 600 11.5px/1 var(--font-body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }

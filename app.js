@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 52; // va tenuto uguale al numero in version.json
+const APP_VERSION = 53; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -2707,6 +2707,7 @@ function init() {
   $('gkey-save').addEventListener('click', async () => {
     const key = $('gkey').value.trim();
     try { if (key) localStorage.setItem(GKEY, key); else localStorage.removeItem(GKEY); } catch (e) { return toast('Non riesco a salvare la chiave su questo telefono.'); }
+    if (typeof scheduleSync === 'function') scheduleSync(500); // la chiave arriva anche sugli altri telefoni
     if (!key) return toast('Chiave rimossa.');
     toast('Provo la chiave…');
     try {

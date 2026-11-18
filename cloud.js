@@ -159,10 +159,20 @@ async function syncSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     if (!$('settings').hidden) renderSettings();
   }
+  // Chiave di Google Books: viaggia con la libreria (la leggono solo i membri), così ogni telefono la riceve da solo.
+  // Se è stata cambiata su questo telefono vince quella; altrimenti si prende quella online.
+  const localKey = localStorage.getItem('libreria.googleKey') || '';
+  const remoteKey = typeof remote.googleKey === 'string' ? remote.googleKey : '';
+  const key = localKey && localKey !== (cloud.keySeen || '') ? localKey : remoteKey || localKey;
+  if (key !== localKey) {
+    localStorage.setItem('libreria.googleKey', key);
+    if (!$('settings').hidden) renderSettings();
+  }
+  cloud.keySeen = key;
   const remoteSig = JSON.stringify(SETTINGS_KEYS.reduce((o, k) => ((o[k] = remote[k] || []), o), {}));
-  if (!hasRemote || mergedSig !== remoteSig) {
+  if (!hasRemote || mergedSig !== remoteSig || key !== remoteKey) {
     const at = Date.now();
-    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: merged, settings_at: at }).eq('id', cloud.lib);
+    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: { ...merged, googleKey: key }, settings_at: at }).eq('id', cloud.lib);
     if (e2) throw e2;
     cloud.settingsAt = at;
   } else {

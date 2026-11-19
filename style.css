@@ -717,3 +717,15 @@ body::before {
 .place-chip[data-list=""] svg { fill: currentColor; stroke: none; }
 .place-chip:not([data-list=""]).on svg { fill: currentColor; }
 .chips-sep { flex-basis: 100%; margin: 6px 0 -2px; font: 600 11.5px/1 var(--font-body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+
+/* v54: il vostro voto in basso a destra sulla copertina */
+.rating-badge { position: absolute; right: 6px; bottom: 8px; z-index: 2; display: inline-flex; align-items: center; gap: 2px; padding: 2px 7px 2px 5px; border-radius: 999px; background: rgba(20, 14, 10, .82); color: #F1E4CF; font: 700 12px/1.3 var(--font-body); box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.rating-badge b { color: var(--accent); font-size: 12px; }
+.z3 .rating-badge { right: 4px; bottom: 5px; padding: 1px 5px 1px 4px; font-size: 9.5px; }
+.z3 .rating-badge b { font-size: 9.5px; }
+/* con il voto a destra, «In corso» e «In prestito» salgono di una riga a sinistra per non sovrapporsi */
+.cell-cover:has(.rating-badge) .badge:not(.loan-badge) { bottom: 34px; }
+.cell-cover:has(.rating-badge) .badge.loan-badge { bottom: 34px; }
+.cell-cover:has(.rating-badge) .badge:not(.loan-badge) + .badge.loan-badge { bottom: 58px; }
+.z3 .cell-cover:has(.rating-badge) .badge:not(.loan-badge), .z3 .cell-cover:has(.rating-badge) .badge.loan-badge { bottom: 24px; }
+.z3 .cell-cover:has(.rating-badge) .badge:not(.loan-badge) + .badge.loan-badge { bottom: 42px; }

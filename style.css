@@ -729,3 +729,5 @@ body::before {
 .cell-cover:has(.rating-badge) .badge:not(.loan-badge) + .badge.loan-badge { bottom: 58px; }
 .z3 .cell-cover:has(.rating-badge) .badge:not(.loan-badge), .z3 .cell-cover:has(.rating-badge) .badge.loan-badge { bottom: 24px; }
 .z3 .cell-cover:has(.rating-badge) .badge:not(.loan-badge) + .badge.loan-badge { bottom: 42px; }
+/* il saluto può andare a capo invece di essere tagliato («Buon pomeriggio Maurizio») */
+.top .count { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; font-size: 15px; }

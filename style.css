@@ -910,3 +910,8 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .sugg-stores { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .sugg-stores .chip { min-height: 40px; padding: 0 14px; }
 .sugg-card .btn.wide { margin-top: 6px; }
+
+/* v67 — proposte: posizione in basso a sinistra, voto medio in basso a destra, «Ce l'avete» in alto */
+.rank-badge { top: auto !important; bottom: 7px; left: 6px !important; }
+.chart-shelves .own-badge { top: 6px; bottom: auto; left: 6px; }
+.discover { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }

@@ -27,7 +27,7 @@ async function membro(auth: string): Promise<boolean> {
 }
 
 // Una domanda a Claude con la ricerca sul web; «pause_turn» = Claude non ha finito di cercare, si continua.
-async function chiedi(prompt: string, ricerche = 5): Promise<{ testo: string; costo: number; err?: string }> {
+async function chiedi(prompt: string, ricerche = 5, pagine = 0): Promise<{ testo: string; costo: number; err?: string }> {
   const key = Deno.env.get("LIBRERIA_ANTHROPIC_KEY") || Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) return { testo: "", costo: 0, err: "manca la chiave" };
   const messages: any[] = [{ role: "user", content: prompt }];
@@ -36,8 +36,10 @@ async function chiedi(prompt: string, ricerche = 5): Promise<{ testo: string; co
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-      body: JSON.stringify({ model: MODELLO, max_tokens: 4000, output_config: { effort: "low" }, messages, // poco ragionamento: risposta più rapida
-        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: ricerche, user_location: { type: "approximate", country: "IT", timezone: "Europe/Rome" } }] }),
+      body: JSON.stringify({ model: MODELLO, max_tokens: 5000, output_config: { effort: "low" }, messages, // poco ragionamento: risposta più rapida
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: ricerche, user_location: { type: "approximate", country: "IT", timezone: "Europe/Rome" } },
+          // Aprire una pagina intera (es. la classifica completa) quando la ricerca ne mostra solo un pezzo.
+          ...(pagine ? [{ type: "web_fetch_20250910", name: "web_fetch", max_uses: pagine, max_content_tokens: 12000 }] : [])] }),
     });
     const j = await r.json();
     tin += Number(j?.usage?.input_tokens || 0); tout += Number(j?.usage?.output_tokens || 0); cerche += Number(j?.usage?.server_tool_use?.web_search_requests || 0);
@@ -88,17 +90,18 @@ async function scopri(b: any) {
   const prompt = `Sei il bibliotecario di una famiglia italiana. Oggi è ${oggi}.\n`
     + `1) Cerca la classifica settimanale dei libri più venduti in Italia di «La Lettura» (supplemento del Corriere della Sera), la più recente uscita:\n`
     + `   riporta la sua TOP 10 GENERALE esattamente nell'ordine pubblicato, senza mescolare altre classifiche. Solo se non la trovi usa quella di Tuttolibri (La Stampa) e dillo in "fonte".\n`
-    + `2) Cerca i «Bestseller in Libri» di Amazon.it (la classifica dei più venduti su Amazon Italia) e riporta i primi 10 nell'ordine mostrato.\n`
+    + `   Servono TUTTI E 10 i titoli: se i risultati della ricerca ne mostrano meno, apri la pagina della classifica con web_fetch e leggila intera.\n`
+    + `2) Cerca i «Bestseller in Libri» di Amazon.it (la classifica dei più venduti su Amazon Italia) e riporta i primi 10 nell'ordine mostrato (apri la pagina con web_fetch se serve, tutti e 10 i titoli).\n`
     + `3) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
     + (gen ? `Generi che leggono: ${gen}.\n` : "") + (temi ? `Temi che amano: ${temi}.\n` : "")
     + `Non proporre libri che hanno già: ${avete || "(nessuno)"}.\n`
     + `Sii rapido: una ricerca per ciascuna classifica basta; i libri simili scegli tu, senza cercarli uno per uno.\n`
     + `Non inventare: solo libri che esistono in italiano; se non sei sicuro dell'ISBN metti null.\n`
     + `Per ogni libro simile indica in "simile_a" il titolo ESATTO di uno dei loro libri amati qui sopra a cui somiglia di più.\n`
-    + `Rispondi SOLO con il JSON: {"fonte": "Classifica di La Lettura" (o quella usata), "settimana": periodo delle vendite come scritto, es. "dal 9 al 15 novembre", "bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null}],`
-    + ` "amazon": [stessi campi di bestseller, con la posizione su Amazon],`
+    + `Rispondi SOLO con il JSON: {"fonte": "Classifica di La Lettura" (o quella usata), "settimana": periodo delle vendite come scritto, es. "dal 9 al 15 novembre", "bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null, "voto": media delle stelle dei lettori da 1 a 5 (es. 4.6) se la vedi su Amazon o Goodreads, altrimenti null}],`
+    + ` "amazon": [stessi campi di bestseller, con la posizione su Amazon e il voto medio mostrato da Amazon],`
     + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "simile_a": titolo di un loro libro amato}]}`;
-  const r = await chiedi(prompt, 3);
+  const r = await chiedi(prompt, 3, 3);
   if (r.err) return { ok: false, error: r.err };
   const j = jsonDa(r.testo);
   if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
@@ -106,6 +109,7 @@ async function scopri(b: any) {
     titolo: s(x.titolo), autore: s(x.autore, 100), editore: x.editore ? s(x.editore, 60) : null,
     isbn: /^97[89]\d{10}$/.test(String(x.isbn || "").replace(/-/g, "")) ? String(x.isbn).replace(/-/g, "") : null,
     posizione: Number(x.posizione) > 0 && Number(x.posizione) < 100 ? Number(x.posizione) : null, simile_a: x.simile_a ? s(x.simile_a, 100) : null,
+    voto: Number(x.voto) >= 1 && Number(x.voto) <= 5 ? Math.round(Number(x.voto) * 10) / 10 : null,
   }));
   return { ok: true, fonte: j.fonte ? s(j.fonte, 60) : null, settimana: j.settimana ? s(j.settimana, 60) : null, bestseller: pulisci(j.bestseller), amazon: pulisci(j.amazon), simili: pulisci(j.simili), costo: r.costo };
 }

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 66; // va tenuto uguale al numero in version.json
+const APP_VERSION = 67; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -198,6 +198,7 @@ function fromGoogleItem(item) {
     description: String(v.description || '').replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n\n').trim(),
     lang: v.language || '',
     seriesNum: String((v.seriesInfo && v.seriesInfo.bookDisplayNumber) || ''),
+    stars: Number(v.averageRating) || 0, // voto medio dei lettori su Google Books, quando c'è
   };
 }
 
@@ -329,6 +330,8 @@ function probeCover(isbn) {
    1) ISBN su Open Library; 2) titolo e autore su Google Books; 3) titolo e autore su Open Library.
    Torna { cover, isbn } (l'ISBN se trovato strada facendo). */
 async function findCover(title, author, isbn) {
+  // Amazon scrive titoli lunghi («Titolo. Sottotitolo: edizione speciale»): per cercare basta la parte principale.
+  title = String(title || '').split(/\s*[:(–—]\s*|\s+-\s+/)[0].trim() || title;
   const t = norm(title || '');
   const sameTitle = (x) => { const n = norm(x || ''); return n && t && (n.startsWith(t) || t.startsWith(n)); };
   if (isbn) { const c = await probeCover(isbn); if (c) return { cover: c, isbn }; }
@@ -336,8 +339,9 @@ async function findCover(title, author, isbn) {
     const q = 'intitle:' + JSON.stringify(title) + (author ? ' inauthor:' + JSON.stringify(firstAuthor(author)) : '');
     const data = await getJson(googleUrl('maxResults=10&q=' + encodeURIComponent(q)));
     const hits = (data.items || []).map(fromGoogleItem).filter((b) => sameTitle(b.title));
+    const stars = (hits.find((b) => b.stars) || {}).stars || 0;
     const withCover = hits.find((b) => b.cover);
-    if (withCover) return { cover: httpsUrl(withCover.cover), isbn: isbn || withCover.isbn || '' };
+    if (withCover) return { cover: httpsUrl(withCover.cover), isbn: isbn || withCover.isbn || '', stars };
     for (const h of hits.slice(0, 3)) if (h.isbn) { const c = await probeCover(h.isbn); if (c) return { cover: c, isbn: isbn || h.isbn }; }
   } catch (e) { /* si prova con Open Library */ }
   try {
@@ -930,18 +934,18 @@ async function maybeRefreshDiscover(force) {
   discoverBusy = false;
   if (!r || !r.ok) { if (viewMode === 'wish') renderList(); return; }
   // Frasi sempre uguali: «3° in classifica» per i più venduti, «Perché vi è piaciuto «…»» per i simili.
-  const conv = (x, reason) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason });
+  const conv = (x, reason) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason, stars: Number(x.voto) || 0 });
   const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
   const out = { updatedAt: Date.now(), source: [r.fonte, r.settimana].filter(Boolean).join(' · '),
     bestsellers: best.map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° in classifica'), rank: x.posizione || i + 1 })),
     amazon: (r.amazon || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99)).map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° su Amazon'), rank: x.posizione || i + 1 })),
-    similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Perché vi è piaciuto «' + x.simile_a + '»' : '')) };
+    similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Simile a «' + x.simile_a + '»' : '')) };
   const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
   save();
   if (viewMode === 'wish') renderList();
   // Copertine (e ISBN mancanti) dai cataloghi, poi si salva di nuovo e si manda agli altri telefoni.
   await Promise.all([...out.bestsellers, ...out.amazon, ...out.similar].map(async (it) => {
-    try { const f = await findCover(it.title, it.authors, it.isbn); it.cover = f.cover; it.isbn = f.isbn; } catch (e) { /* resta il segnaposto */ }
+    try { const f = await findCover(it.title, it.authors, it.isbn); it.cover = f.cover; it.isbn = f.isbn; if (!it.stars && f.stars) it.stars = f.stars; } catch (e) { /* resta il segnaposto */ }
   }));
   out.updatedAt = Date.now();
   save();
@@ -1156,7 +1160,7 @@ function suggCell(it, opts = {}) {
     ? `<img src="${esc(httpsUrl(it.cover))}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${esc((it.title || '?').charAt(0))}" data-ph="${esc(phInner(it))}" data-color="${esc(color)}">`
     : phInner(it);
   return `<button class="cell disc" data-sugg="${i}">
-    <span class="cell-cover${it.cover ? '' : ' ph-cover'}" style="background:${color};color:${inkOn(color)}">${inner}${opts.rank ? `<span class="rank-badge">${opts.rank}</span>` : ''}${own ? `<span class="badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
+    <span class="cell-cover${it.cover ? '' : ' ph-cover'}" style="background:${color};color:${inkOn(color)}">${inner}${opts.rank ? `<span class="rank-badge">${opts.rank}</span>` : ''}${Number(it.stars) ? `<span class="rating-badge" aria-label="Voto medio dei lettori ${fmtRating(Math.round(it.stars * 10) / 10)} su 5"><b>★</b>${fmtRating(Math.round(it.stars * 10) / 10)}</span>` : ''}${own ? `<span class="badge own-badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
     ${opts.caption ? `<span class="disc-reason">${esc(opts.caption)}</span>` : ''}
   </button>`;
 }
@@ -1209,6 +1213,7 @@ function renderSugg() {
         ${author ? `<button class="link-btn sugg-author" data-sugg-author="${esc(author)}">${esc(it.authors)} ›</button>` : ''}
         ${meta ? `<p class="sugg-meta">${esc(meta)}</p>` : ''}
         ${it.reason ? `<p class="sugg-reason">✨ ${esc(it.reason)}</p>` : ''}
+        ${Number(it.stars) ? `<p class="sugg-meta">Voto medio dei lettori: ★ ${fmtRating(Math.round(it.stars * 10) / 10)} su 5</p>` : ''}
       </div>
     </div>
     <p class="sugg-plot">${it.plot ? esc(it.plot.length > 600 ? it.plot.slice(0, 600).replace(/\s+\S*$/, '') + '…' : it.plot) : it.plotTried ? '' : '<span class="claude-wait">Cerco la trama…</span>'}</p>
@@ -1506,7 +1511,8 @@ function renderList() {
   }
   if (authorPage && total) $('list').insertAdjacentHTML('beforeend', claudeAuthorHtml(authorPage.slice(7)) + authorMoreHtml(authorPage.slice(7)));
   // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».
-  if (wish && !q && !filterList) $('list').insertAdjacentHTML('afterbegin', discoverHtml());
+  // I vostri desideri in cima, sempre sott'occhio; «Da scoprire» sotto.
+  if (wish && !q && !filterList) $('list').insertAdjacentHTML('beforeend', discoverHtml());
   visibleIds = books.map((b) => b.id);
   $('btn-back').hidden = !backTo;
   const showing = total && books.length;

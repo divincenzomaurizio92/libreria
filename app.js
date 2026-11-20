@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 63; // va tenuto uguale al numero in version.json
+const APP_VERSION = 64; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -323,6 +323,29 @@ function probeCover(isbn) {
     img.onerror = () => resolve('');
     img.src = url;
   });
+}
+
+/* Copertina per un libro proposto (dal Bibliotecario o da una classifica): si provano tre strade, dalla più precisa.
+   1) ISBN su Open Library; 2) titolo e autore su Google Books; 3) titolo e autore su Open Library.
+   Torna { cover, isbn } (l'ISBN se trovato strada facendo). */
+async function findCover(title, author, isbn) {
+  const t = norm(title || '');
+  const sameTitle = (x) => { const n = norm(x || ''); return n && t && (n.startsWith(t) || t.startsWith(n)); };
+  if (isbn) { const c = await probeCover(isbn); if (c) return { cover: c, isbn }; }
+  try {
+    const q = 'intitle:' + JSON.stringify(title) + (author ? ' inauthor:' + JSON.stringify(firstAuthor(author)) : '');
+    const data = await getJson(googleUrl('maxResults=10&q=' + encodeURIComponent(q)));
+    const hits = (data.items || []).map(fromGoogleItem).filter((b) => sameTitle(b.title));
+    const withCover = hits.find((b) => b.cover);
+    if (withCover) return { cover: httpsUrl(withCover.cover), isbn: isbn || withCover.isbn || '' };
+    for (const h of hits.slice(0, 3)) if (h.isbn) { const c = await probeCover(h.isbn); if (c) return { cover: c, isbn: isbn || h.isbn }; }
+  } catch (e) { /* si prova con Open Library */ }
+  try {
+    const data = await getJson('https://openlibrary.org/search.json?limit=5&fields=title,cover_i,isbn&title=' + encodeURIComponent(title) + (author ? '&author=' + encodeURIComponent(firstAuthor(author)) : ''));
+    const d = (data.docs || []).find((x) => x.cover_i && sameTitle(x.title));
+    if (d) return { cover: 'https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg', isbn: isbn || ((d.isbn || []).map(toIsbn13).find(Boolean) || '') };
+  } catch (e) { /* niente */ }
+  return { cover: '', isbn: isbn || '' };
 }
 
 function storeLinks(book) {
@@ -905,22 +928,19 @@ async function maybeRefreshDiscover(force) {
   });
   discoverBusy = false;
   if (!r || !r.ok) { if (viewMode === 'wish') renderList(); return; }
-  const conv = (x) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason: x.motivo || '' });
-  const out = { updatedAt: Date.now(), bestsellers: (r.bestseller || []).map(conv), similar: (r.simili || []).map(conv) };
+  // Frasi sempre uguali: «3° in classifica» per i più venduti, «Perché vi è piaciuto «…»» per i simili.
+  const conv = (x, reason) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason });
+  const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
+  const out = { updatedAt: Date.now(),
+    bestsellers: best.map((x, i) => conv(x, (x.posizione || i + 1) + '° in classifica')),
+    similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Perché vi è piaciuto «' + x.simile_a + '»' : '')) };
   const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
   save();
   if (viewMode === 'wish') renderList();
   // Copertine (e ISBN mancanti) dai cataloghi, poi si salva di nuovo e si manda agli altri telefoni.
-  for (const it of [...out.bestsellers, ...out.similar]) {
-    try {
-      if (!it.isbn) {
-        const t = norm(it.title);
-        const hit = (await searchByText([it.title, it.authors].join(' '))).find((x) => norm(x.title).startsWith(t) || t.startsWith(norm(x.title)));
-        if (hit) { it.isbn = hit.isbn || ''; it.cover = hit.cover || ''; }
-      }
-      if (!it.cover && it.isbn) it.cover = await probeCover(it.isbn);
-    } catch (e) { /* senza copertina: resta il segnaposto */ }
-  }
+  await Promise.all([...out.bestsellers, ...out.similar].map(async (it) => {
+    try { const f = await findCover(it.title, it.authors, it.isbn); it.cover = f.cover; it.isbn = f.isbn; } catch (e) { /* resta il segnaposto */ }
+  }));
   out.updatedAt = Date.now();
   save();
   if (viewMode === 'wish') renderList();
@@ -969,7 +989,7 @@ async function askClaudeAuthor(name) {
     try { localStorage.setItem(claudeAuthorKey(name), JSON.stringify(claudeAuthor[name])); } catch (e) { /* niente */ }
     // Copertine di riserva per i libri con ISBN.
     const st = claudeAuthor[name];
-    Promise.all(st.libri.filter((x) => x.isbn).slice(0, 20).map(async (x) => { x.cover = await probeCover(x.isbn); })).then(() => {
+    Promise.all(st.libri.slice(0, 20).map(async (x) => { const f = await findCover(x.titolo, name, x.isbn); x.cover = f.cover; if (!x.isbn) x.isbn = f.isbn; })).then(() => {
       try { localStorage.setItem(claudeAuthorKey(name), JSON.stringify(st)); } catch (e) { /* niente */ }
       if (filterParts().includes('author:' + name)) renderList();
     });
@@ -1137,9 +1157,10 @@ function discoverHtml() {
     return `<p class="disc-sub">${title}</p><div class="rail">${cells}</div>`;
   };
   const body = d ? rail('I più venduti in Italia', d.bestsellers) + rail('Simili ai vostri preferiti', d.similar) : '';
-  const when = d && d.updatedAt ? ' · aggiornato il ' + new Date(d.updatedAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }) : '';
+  const canAsk = typeof cloudReady === 'function' && cloudReady();
   return `<section class="rail-sec discover">
-    <h3 class="rail-label">Da scoprire<small>${esc(when)}</small></h3>
+    <div class="disc-head"><h3 class="rail-label">Da scoprire</h3>${d && canAsk ? `<button class="chip disc-refresh" data-disc-now ${discoverBusy ? 'disabled' : ''}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>Aggiorna</button>` : ''}</div>
     ${discoverBusy ? '<p class="hint claude-wait disc-wait">✨ Il Bibliotecario sta scegliendo i libri della settimana…</p>' : ''}
     ${body || (discoverBusy ? '' : `<div class="disc-empty">
       <div class="disc-ghosts" aria-hidden="true"><span></span><span></span><span></span><span></span></div>

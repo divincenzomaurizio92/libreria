@@ -4,7 +4,7 @@
 // Chiave: LIBRERIA_ANTHROPIC_KEY se c'è (per tenere i costi separati), altrimenti ANTHROPIC_API_KEY già usata dall'HUB.
 //  · {azione: "autore", nome, lingua, vostri: [{titolo, numero}]} → { ok, libri: [{titolo, saga, numero, anno, editore, isbn, prezzo, nota}], costo }
 //  · {azione: "scopri", preferiti: [{titolo, autore, voto}], generi: [..], temi: [..], avete: [titoli]}
-//      → { ok, bestseller: [{titolo, autore, isbn, editore, motivo}], simili: [...], costo }   (sezione «Da scoprire», una volta a settimana)
+//      → { ok, bestseller: [{posizione, titolo, autore, isbn, editore}], simili: [{titolo, autore, isbn, editore, simile_a}], costo }   (sezione «Da scoprire», una volta a settimana)
 const SB = Deno.env.get("SUPABASE_URL")!;
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const out = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -92,15 +92,17 @@ async function scopri(b: any) {
     + `Non proporre libri che hanno già: ${avete || "(nessuno)"}.\n`
     + `Sii rapido: una o due ricerche bastano (la classifica della settimana); i libri simili scegli tu, senza cercarli uno per uno.\n`
     + `Non inventare: solo libri che esistono in italiano; se non sei sicuro dell'ISBN metti null.\n`
-    + `Rispondi SOLO con il JSON: {"bestseller": [{"titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null, "motivo": brevissimo, es. "n. 1 in classifica"}],`
-    + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "motivo": brevissimo, es. "perché vi è piaciuto «Io uccido»"}]}`;
+    + `Per ogni libro simile indica in "simile_a" il titolo ESATTO di uno dei loro libri amati qui sopra a cui somiglia di più.\n`
+    + `Rispondi SOLO con il JSON: {"bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null}],`
+    + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "simile_a": titolo di un loro libro amato}]}`;
   const r = await chiedi(prompt, 2);
   if (r.err) return { ok: false, error: r.err };
   const j = jsonDa(r.testo);
   if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
   const pulisci = (L: any) => (Array.isArray(L) ? L : []).slice(0, 12).filter((x: any) => x && x.titolo).map((x: any) => ({
     titolo: s(x.titolo), autore: s(x.autore, 100), editore: x.editore ? s(x.editore, 60) : null,
-    isbn: /^97[89]\d{10}$/.test(String(x.isbn || "").replace(/-/g, "")) ? String(x.isbn).replace(/-/g, "") : null, motivo: x.motivo ? s(x.motivo, 90) : null,
+    isbn: /^97[89]\d{10}$/.test(String(x.isbn || "").replace(/-/g, "")) ? String(x.isbn).replace(/-/g, "") : null,
+    posizione: Number(x.posizione) > 0 && Number(x.posizione) < 100 ? Number(x.posizione) : null, simile_a: x.simile_a ? s(x.simile_a, 100) : null,
   }));
   return { ok: true, bestseller: pulisci(j.bestseller), simili: pulisci(j.simili), costo: r.costo };
 }

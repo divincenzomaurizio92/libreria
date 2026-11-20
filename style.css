@@ -873,3 +873,10 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .pick-list-card p { margin: 0 0 6px; font-weight: 600; }
 .disc-wait { margin: 4px 0 12px; }
 .disc-empty .claude-ask { display: inline-flex; margin-top: 10px; }
+
+/* v64 — «Da scoprire»: Aggiorna in alto a destra */
+.disc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.disc-head .rail-label { margin-bottom: 0; }
+.disc-refresh { min-height: 36px; padding: 0 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+.disc-refresh svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.disc-refresh[disabled] { opacity: .5; }

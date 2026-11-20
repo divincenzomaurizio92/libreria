@@ -61,7 +61,7 @@ boughtAt, price, loanTo, loanDate, addedAt, updatedAt`.
 
 ---
 
-## 3. Cosa c'è (Versione 57)
+## 3. Cosa c'è (Versione 72)
 
 **Inserimento:** scansione singola, a raffica (con riepilogo e "vale per tutti": persona, mobile, lettura),
 "Ce l'ho già?" in negozio, penna con risultati mentre scrivi, codici non ISBN (edicola 977, codici interni dei
@@ -91,6 +91,16 @@ persona e anno, letti, obiettivo sincronizzato tra i telefoni, pagine, voto medi
 mese per mese, copertine. **Importa da altre app** (Impostazioni): CSV di Goodreads/StoryGraph/Libib/Handy
 Library, Excel, oppure elenco incollato (ISBN o "Titolo - Autore"); doppioni saltati, poi completamento dai
 cataloghi come la raffica (anche per titolo, se manca l'ISBN).
+
+**Novità v62–72:** il «Bibliotecario» (Claude) nella pagina autore: «Avete già» in elenco, proposte su mensole,
+ordine per anno, scelta della lista desideri. **Da scoprire** (Desideri, sotto la vostra lista): una volta a settimana
+da solo (o con «Aggiorna»), uguale per tutta la famiglia e sincronizzato; classifica **Feltrinelli** letta
+direttamente dal sito dalla funzione (10 titoli esatti con copertine, gratis), «Simili ai vostri preferiti»
+scelti dal Bibliotecario («Simile a «…»»). Tutte le proposte stanno su mensole con posizione (in basso a sinistra)
+e voto medio dei lettori (in basso a destra, se trovato); toccandole si apre una scheda con trama (280 caratteri +
+«Leggi tutto»), «Aggiungi ai desideri» e «Dove comprarlo» (Amazon, IBS, Feltrinelli, Mondadori con l'ISBN).
+Amazon non si legge dai server (blocco anti-robot): non si aggira. La funzione `libreria-prova` su Supabase è
+stata svuotata (risponde 410) e si può eliminare dalla dashboard.
 
 **Claude collegato (v61):** funzione Supabase `libreria-claude` su DR HUB (codice in `supabase/functions/libreria-claude/`),
 solo per i membri della libreria. Usa la chiave `LIBRERIA_ANTHROPIC_KEY` se esiste, altrimenti `ANTHROPIC_API_KEY` già

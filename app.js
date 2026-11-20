@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 57; // va tenuto uguale al numero in version.json
+const APP_VERSION = 58; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -517,6 +517,10 @@ function toggleFilter(v) {
 let viewMode = 'library'; // 'library' = libri posseduti, 'wish' = liste desideri
 let filterList = '';
 let claims = {}; // libri dei desideri prenotati da chi ha il link della lista: id libro → { name, id }
+// Il nome di chi regala resta nascosto (sorpresa!) finché non si tocca «Mostra»: vale fino alla chiusura dell'app.
+let claimsShown = false;
+const claimRevealed = new Set();
+const claimName = (id) => (claimsShown || claimRevealed.has(id) ? claims[id].name : '');
 
 function coverHtml(book, big) {
   const initial = esc((book.title || '?').trim().charAt(0).toUpperCase() || '?');
@@ -532,11 +536,11 @@ function isIncomplete(b) {
 
 function bookRowHtml(b, attr) {
   const series = b.series ? b.series + (b.seriesNum ? ' n. ' + b.seriesNum : '') : '';
-  const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : '', series, b.rating ? '★'.repeat(b.rating) : '', b.list && Number(b.price) > 0 ? euro(b.price) : ''].filter(Boolean).join(' · ');
+  const meta = [b.publisher, b.year, b.pages ? b.pages + ' pag.' : '', series, b.rating ? starsStr(b.rating) : '', b.list && Number(b.price) > 0 ? euro(b.price) : ''].filter(Boolean).join(' · ');
   const tags = (b.status === 'reading' ? '<span class="tag reading">In corso</span>' : b.status === 'toread' ? '<span class="tag">Da leggere</span>' : '')
     + (b.loanTo ? `<span class="tag loan">Prestato a ${esc(b.loanTo)}</span>` : '')
     + (b.list ? `<span class="tag wish">${esc(b.list)}</span>` : '')
-    + (b.list && claims[b.id] ? `<span class="tag claim">🎁 Lo prende ${esc(claims[b.id].name)}</span>` : '')
+    + (b.list && claims[b.id] ? `<span class="tag claim">🎁 ${claimName(b.id) ? 'Lo prende ' + esc(claimName(b.id)) : 'Già preso'}</span>` : '')
     + ownersOf(b).map((o) => `<span class="tag">${esc(o)}</span>`).join('')
     + (b.genres || []).map((g) => `<span class="tag">${esc(g)}</span>`).join('');
   return `<button class="book" ${attr}>
@@ -573,7 +577,7 @@ function gridCellHtml(b) {
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-title">${esc(b.title || 'Senza titolo')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(b.authors))}</span>`;
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}${selecting && selected.has(b.id) ? ' sel' : ''}" data-id="${esc(b.id)}">
-    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${b.list && claims[b.id] ? `<span class="badge claim-badge">🎁 ${esc(claims[b.id].name)}</span>` : ''}${Number(b.rating) > 0 ? `<span class="rating-badge" role="img" aria-label="Voto ${Number(b.rating)} su 5"><b>★</b>${Number(b.rating)}</span>` : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${b.list && claims[b.id] ? `<span class="badge claim-badge">🎁 ${esc(claimName(b.id) || 'Preso')}</span>` : ''}${Number(b.rating) > 0 ? `<span class="rating-badge" role="img" aria-label="Voto ${fmtRating(b.rating)} su 5"><b>★</b>${fmtRating(b.rating)}</span>` : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
   </button>`;
@@ -876,6 +880,57 @@ const normTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9à-ù]+/
 function haveIt(item) {
   return state.books.find((b) => (item.isbn && b.isbn === item.isbn) || (normTitle(b.title) && normTitle(b.title) === normTitle(item.title)));
 }
+/* ---------- Pagina autore: gli altri suoi libri, dai cataloghi ----------
+   Si cercano su Google Books (edizioni italiane prima) e si tolgono quelli che avete già. */
+const authorMore = {}; // nome → { loading } oppure { items }
+function authorMoreHtml(name) {
+  const st = authorMore[name];
+  if (!st) {
+    authorMore[name] = { loading: true };
+    loadAuthorMore(name);
+    return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Cerco nei cataloghi…</p></section>`;
+  }
+  if (st.loading) return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Cerco nei cataloghi…</p></section>`;
+  const t = (b) => norm(b.title).replace(/\s+/g, ' ');
+  const mine = state.books.filter((b) => authorsOf(b).some((a) => norm(a) === norm(name)));
+  const items = st.items.filter((x) => !state.books.some((b) => (x.isbn && b.isbn === x.isbn)) && !mine.some((b) => t(b) === t(x) || t(b).startsWith(t(x)) || t(x).startsWith(t(b))));
+  if (!items.length) return st.failed ? `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Non riesco a raggiungere i cataloghi: riprova più tardi.</p></section>` : '';
+  return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)} · ${items.length}</h3>
+    <p class="hint">Dai cataloghi: quelli che non avete ancora.</p>
+    ${items.map((x) => `<div class="book more-book"><span class="cover"${x.cover ? ` style="background-image:url('${esc(x.cover)}')"` : ''}>${x.cover ? '' : esc((x.title || '?').charAt(0))}</span>
+      <span class="book-info"><span class="book-title">${esc(x.title)}</span><span class="book-author">${esc([x.year, x.publisher].filter(Boolean).join(' · '))}</span>
+      <span class="more-actions"><button class="chip" data-more-wish="${esc(name)}|${st.items.indexOf(x)}">＋ Desideri</button>${storeLinks(x).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('')}
+  </section>`;
+}
+async function loadAuthorMore(name) {
+  const st = authorMore[name];
+  try {
+    const q = encodeURIComponent('inauthor:"' + name + '"');
+    let data = await getJson(googleUrl('maxResults=30&langRestrict=it&printType=books&q=' + q));
+    if (!(data.items || []).length) data = await getJson(googleUrl('maxResults=30&printType=books&q=' + q));
+    const seen = new Set();
+    st.items = (data.items || []).map(fromGoogleItem).filter((b) => b.title && authorsOf(b).some((a) => norm(a) === norm(name)))
+      .map((b) => ({ ...b, publisher: cleanPublisher(b.publisher), cover: (b.cover || '').replace(/^http:/, 'https:') }))
+      .filter((b) => { const k = norm(b.title); if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => (Number(a.year) || 9999) - (Number(b.year) || 9999));
+  } catch (e) { st.items = []; st.failed = true; }
+  st.loading = false;
+  if (filterParts().includes('author:' + name)) renderList();
+}
+function addAuthorMoreToWish(key) {
+  const i = key.lastIndexOf('|');
+  const x = (authorMore[key.slice(0, i)] || {}).items?.[Number(key.slice(i + 1))];
+  if (!x) return;
+  if (!state.wishlists.length) state.wishlists.push('Da comprare');
+  const list = pref('libreria.lastList', '') && state.wishlists.includes(pref('libreria.lastList', '')) ? pref('libreria.lastList', '') : state.wishlists[0];
+  state.books.push({ id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: x.isbn || '', title: x.title, subtitle: x.subtitle || '', authors: x.authors || '', publisher: x.publisher || '',
+    year: x.year || '', pages: x.pages || '', cover: x.cover || '', plot: x.description || '', plotTried: true, lang: x.lang || '',
+    genres: suggestGenres(x.subjects, x.authors, x.description).genres.filter((g) => state.genres.includes(g)), owners: [], list, status: '', media: [] });
+  saveState();
+  renderList();
+  toast('«' + x.title + '» aggiunto ai desideri: ' + list);
+}
+
 function discoverHtml() {
   const d = loadDiscover();
   discoverItems = [];
@@ -993,17 +1048,17 @@ function renderYear() {
     <div class="chips year-years">${years.map((y) => `<button class="chip${y === yearSel ? ' on' : ''}" data-year="${y}">${y}</button>`).join('')}</div>
     <div class="year-hero"><span class="year-n">${n}</span><span>${n === 1 ? 'libro letto' : 'libri letti'} nel ${yearSel}${yearWho ? ' da ' + esc(yearWho) : ''}</span></div>
     ${goalHtml}
-    <div class="goal-set"><input id="goal-n" type="number" inputmode="numeric" min="0" max="999" placeholder="Obiettivo" value="${goal || ''}" aria-label="Obiettivo di libri per il ${yearSel}"><button class="btn ghost" id="goal-save">${goal ? 'Cambia obiettivo' : 'Imposta obiettivo'}</button></div>
+    <div class="goal-set"><input id="goal-n" type="number" inputmode="numeric" min="0" max="999" placeholder="Quanti?" value="${goal || ''}" aria-label="Obiettivo di libri per il ${yearSel}"><button class="btn ghost" id="goal-save">${goal ? 'Cambia obiettivo' : 'Imposta obiettivo'}</button></div>
     ${n ? `<div class="ystats">
       ${cell('Pagine lette', pages ? pages.toLocaleString('it-IT') : '')}
       ${cell('Voto medio', avg ? avg.toFixed(1).replace('.', ',') + ' ★' : '')}
       ${cell('Genere preferito', genre ? esc(genre[0]) : '')}
-      ${cell('Autore più letto', author && author[1] > 1 ? esc(author[0]) + ' (' + author[1] + ')' : '')}
+      ${author && author[1] > 1 ? `<button class="ystat ystat-link" data-author="${esc(author[0])}"><span>Autore più letto</span><strong>${esc(author[0])} (${author[1]}) ›</strong></button>` : ''}
       ${cell('Il più lungo', longest ? esc(longest.title) + ' · ' + longest.pages + ' pag.' : '')}
       ${cell('Ascoltati su Audible', heard || '')}
     </div>` : ''}
     ${months.some(Boolean) ? `<h3>Mese per mese</h3><div class="months">${months.map((m, i) => `<div class="month"><i style="height:${Math.round((m / maxM) * 100)}%"></i><b>${m || ''}</b><span>${'GFMAMGLASOND'[i]}</span></div>`).join('')}</div>` : ''}
-    ${best.length ? `<h3>I più amati</h3><div class="year-covers">${best.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}<span>${'★'.repeat(b.rating)}</span></button>`).join('')}</div>` : ''}
+    ${best.length ? `<h3>I più amati</h3><div class="year-covers">${best.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}<span>${starsStr(b.rating)}</span></button>`).join('')}</div>` : ''}
     ${n ? `<h3>Tutti i letti del ${yearSel}</h3><div class="year-covers">${read.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}</button>`).join('')}</div>`
       : `<div class="empty"><strong>Ancora nessun libro letto nel ${yearSel}</strong>Quando segnate un libro come «Letto», qui compare con la sua copertina.</div>`}
     ${undated ? `<p class="hint">${undated === 1 ? '1 libro letto non ha' : undated + ' libri letti non hanno'} l'anno in «Letto nel», quindi non ${undated === 1 ? 'compare' : 'compaiono'} qui. <button class="link-btn" data-undated>Mostrali</button></p>` : ''}
@@ -1071,8 +1126,10 @@ function renderList() {
   if (wish) {
     if (filterList && !state.wishlists.includes(filterList)) filterList = '';
     $('filters').innerHTML = state.wishlists.length
-      ? chip('', 'Tutte', !filterList) + state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')
+      ? state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')
         // Con una lista scelta si può mandarne il link a parenti e amici.
+        + (wished.some((b) => claims[b.id] && (!filterList || b.list === filterList))
+          ? `<button class="chip${claimsShown ? ' on' : ''}" data-claims aria-pressed="${claimsShown}">🎁 ${claimsShown ? 'Nascondi chi regala' : 'Mostra chi regala'}</button>` : '')
         + (filterList ? `<button class="chip share-chip" data-share><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/></svg>Condividi</button>` : '')
       : '';
   } else if (audio) {
@@ -1149,6 +1206,7 @@ function renderList() {
       if (homeOrder) books = homeOrder;
     }
   }
+  if (authorPage && total) $('list').insertAdjacentHTML('beforeend', authorMoreHtml(authorPage.slice(7)));
   // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».
   if (wish && !q && !filterList) $('list').insertAdjacentHTML('afterbegin', discoverHtml());
   visibleIds = books.map((b) => b.id);
@@ -1202,7 +1260,7 @@ function openPeek(id, anchor) {
       <div class="peek-text">
         <strong>${esc(b.title || 'Senza titolo')}</strong>
         ${b.authors ? `<span>${esc(b.authors)}</span>` : ''}
-        ${b.rating ? `<span aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
+        ${b.rating ? starsShow(b.rating) : ''}
       </div>
     </div>
     ${facts.length ? `<dl class="peek-facts">${facts.map(([k, v]) => `<div><b>${k}:</b> ${esc(v)}</div>`).join('')}</dl>` : ''}
@@ -1288,7 +1346,7 @@ function renderView(b) {
           <h2>${esc(b.title || 'Senza titolo')}</h2>
           ${b.subtitle ? `<span class="hero-sub">${esc(b.subtitle)}</span>` : ''}
           ${b.authors ? `<span class="hero-author">${authorsOf(b).map((a) => (own ? `<button class="author-link" data-goto="author:${esc(a)}">${esc(a)}</button>` : esc(a))).join(', ')}</span>` : ''}
-          ${b.rating ? `<span class="hero-stars" role="img" aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
+          ${b.rating ? `<span class="hero-stars">${starsShow(b.rating)}</span>` : ''}
         </div>
       </div>
       ${tags.length ? `<div class="hero-tags">${tags.map(([label, go]) => go ? `<button class="tag" data-goto="${esc(go)}">${esc(label)}</button>` : `<span class="tag still">${esc(label)}</span>`).join('')}</div>` : ''}
@@ -1300,7 +1358,8 @@ function renderView(b) {
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
     ${quotesHtml(b)}
     ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
-    ${b.list && claims[b.id] ? `<p class="view-claim">🎁 Lo prende <strong>${esc(claims[b.id].name)}</strong>, dal link della lista. <button class="link-btn" data-act="unclaim">Rendilo di nuovo libero</button></p>` : ''}
+    ${b.list && claims[b.id] ? `<p class="view-claim">🎁 ${claimName(b.id) ? `Lo prende <strong>${esc(claimName(b.id))}</strong>` : 'Qualcuno ha già preso questo libro'}, dal link della lista.
+      ${claimName(b.id) ? '' : '<button class="link-btn" data-act="reveal">Mostra chi</button>'}<button class="link-btn" data-act="unclaim">Rendilo di nuovo libero</button></p>` : ''}
     <div class="view-actions">
       ${b.loanTo ? '<button class="btn primary wide" data-act="returned">È tornato a casa</button>' : ''}
       ${b.list ? '<button class="btn primary wide" data-act="bought">Comprato: sposta in libreria</button>' : ''}
@@ -1332,7 +1391,8 @@ function openBook(book, opts = {}) {
   const defaultList = viewMode === 'wish' ? (filterList || state.wishlists[0] || '') : '';
   current = { book: { ...book }, isNew, selected: new Set(book.genres || []), list: isNew ? (book.list ?? defaultList) : (book.list || ''), media: new Set(mediaOf(book)) };
   if (current.list) current.media.delete('paper');
-  $('book-heading').textContent = isNew ? 'Nuovo libro' : 'Scheda libro';
+  $('book-heading').textContent = isNew ? 'Nuovo libro' : 'Modifica';
+  $('book-close').innerHTML = isNew ? 'Annulla' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Indietro';
   for (const k of FIELDS) $('f-' + k).value = book[k] || '';
   current.owners = new Set(ownersOf(book));
   current.rating = Number(book.rating) || 0;
@@ -1419,10 +1479,44 @@ function renderFormOwners() {
     .join('');
 }
 
+/* ---------- Stelle: voto da 0,5 a 5 a mezze stelle ---------- */
+const fmtRating = (r) => String(Number(r) || 0).replace('.', ',');
+const starsStr = (r) => { r = Number(r) || 0; return '★'.repeat(Math.floor(r)) + (r % 1 ? '½' : ''); };
+const starsShow = (r) => `<span class="stars-show" style="--r:${Number(r) || 0}" role="img" aria-label="${fmtRating(r)} stelle su 5">★★★★★</span>`;
+function starsButtons(v) {
+  return [1, 2, 3, 4, 5].map((n) => `<button type="button" class="${n <= v ? 'on' : n - 0.5 === v ? 'half' : ''}" data-star="${n}" aria-label="${n} su 5" aria-pressed="${n === v}">★</button>`).join('')
+    + `<span class="stars-val">${v ? fmtRating(v) : ''}</span>`;
+}
+/* Si vota toccando una stella o facendo scorrere il dito sopra: la metà sinistra di una stella vale mezzo punto.
+   Toccare di nuovo lo stesso voto lo toglie. */
+function bindStars(el, get, set) {
+  let start = 0, moved = false, active = false;
+  const valueAt = (x) => {
+    const btns = el.querySelectorAll('[data-star]');
+    const left = btns[0].getBoundingClientRect().left, right = btns[4].getBoundingClientRect().right;
+    return Math.max(0.5, Math.min(5, Math.ceil(((x - left) / (right - left)) * 10) / 2));
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('[data-star]')) return;
+    active = true; moved = false; start = get();
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* niente */ }
+    set(valueAt(e.clientX));
+  });
+  el.addEventListener('pointermove', (e) => { if (!active) return; const v = valueAt(e.clientX); if (v !== get()) { moved = true; set(v); } });
+  const end = () => {
+    if (!active) return;
+    active = false;
+    if (!moved && get() === start) set(0);
+    if (navigator.vibrate) navigator.vibrate(8);
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', () => { active = false; });
+  // Tastiera: Invio sulla stella dà il voto pieno.
+  el.addEventListener('click', (e) => { const b = e.target.closest('[data-star]'); if (b && e.detail === 0) set(get() === Number(b.dataset.star) ? 0 : Number(b.dataset.star)); });
+}
+
 function renderFormRating() {
-  $('f-rating').innerHTML = [1, 2, 3, 4, 5]
-    .map((n) => `<button type="button" class="${n <= current.rating ? 'on' : ''}" data-star="${n}" aria-label="${n} su 5" aria-pressed="${n === current.rating}">★</button>`)
-    .join('');
+  $('f-rating').innerHTML = starsButtons(current.rating);
 }
 
 function renderFormLists() {
@@ -1494,8 +1588,7 @@ function readForm() {
    Si può sempre rimandare: voto e commento restano modificabili dalla scheda. */
 let reviewId = '', reviewStars = 0;
 function renderReviewStars() {
-  $('review-stars').innerHTML = [1, 2, 3, 4, 5]
-    .map((n) => `<button type="button" class="${n <= reviewStars ? 'on' : ''}" data-star="${n}" aria-label="${n} su 5" aria-pressed="${n === reviewStars}">★</button>`).join('');
+  $('review-stars').innerHTML = starsButtons(reviewStars);
 }
 function openReview(b) {
   reviewId = b.id;
@@ -1998,7 +2091,7 @@ function cleanRecord(o) {
   if (!r.isbn && /^\d{6,14}$/.test(v(o.isbn))) r.barcode = v(o.isbn);
   const y = v(o.year).match(/(1[5-9]|20)\d{2}/); r.year = y ? y[0] : '';
   r.pages = String(parseInt(v(o.pages), 10) || '').replace(/^0$/, '');
-  const rt = Math.round(parseFloat(v(o.rating).replace(',', '.')) || 0); r.rating = rt >= 1 && rt <= 5 ? rt : 0;
+  const rt = Math.round((parseFloat(v(o.rating).replace(',', '.')) || 0) * 2) / 2; r.rating = rt >= 0.5 && rt <= 5 ? rt : 0;
   const st = v(o.status).toLowerCase();
   r.status = /^(read|letto|letti|finished)$/.test(st) ? 'read' : /currently|in corso|reading|leggendo/.test(st) ? 'reading' : /to-read|to read|da leggere|want/.test(st) ? 'toread' : '';
   // Date: 2024/03/12, 2024-03-12, 12/03/2024 → 12/03/2024; un anno resta un anno.
@@ -2095,7 +2188,7 @@ function renderImport() {
   $('import-complete').checked = importOpts.complete;
   $('import-go').disabled = !fresh.length;
   $('import-go').textContent = fresh.length === 1 ? 'Importa 1 libro' : 'Importa ' + fresh.length + ' libri';
-  $('import-preview').innerHTML = importRows.slice(0, 60).map(({ r, dup }) => `<div class="import-row${dup ? ' dup' : ''}"><strong>${esc(r.title || 'ISBN ' + r.isbn)}</strong><span>${esc([r.authors, r.status ? STATUS[r.status] : '', r.rating ? '★'.repeat(r.rating) : '', dup ? 'già presente' : ''].filter(Boolean).join(' · '))}</span></div>`).join('')
+  $('import-preview').innerHTML = importRows.slice(0, 60).map(({ r, dup }) => `<div class="import-row${dup ? ' dup' : ''}"><strong>${esc(r.title || 'ISBN ' + r.isbn)}</strong><span>${esc([r.authors, r.status ? STATUS[r.status] : '', r.rating ? starsStr(r.rating) : '', dup ? 'già presente' : ''].filter(Boolean).join(' · '))}</span></div>`).join('')
     + (importRows.length > 60 ? `<p class="hint">…e altri ${importRows.length - 60}.</p>` : '');
 }
 
@@ -2604,7 +2697,9 @@ function init() {
       return;
     }
     if (chip.dataset.share !== undefined) { shareList(filterList); return; }
-    if (viewMode === 'wish') filterList = chip.dataset.genre; else filterGenre = chip.dataset.genre;
+    if (chip.dataset.claims !== undefined) { claimsShown = !claimsShown; renderList(); return; }
+    // Nei desideri si tocca di nuovo la lista accesa per tornare a vederle tutte.
+    if (viewMode === 'wish') filterList = filterList === chip.dataset.genre ? '' : chip.dataset.genre; else filterGenre = chip.dataset.genre;
     renderList();
   });
   $('filter-close').addEventListener('click', () => hide('filter-sheet'));
@@ -2691,6 +2786,7 @@ function init() {
   }, { passive: true });
   $('list').addEventListener('touchend', () => { pinch = null; }, { passive: true });
   $('list').addEventListener('click', (e) => { const d = e.target.closest('[data-disc]'); if (d) openDiscover(Number(d.dataset.disc)); });
+  $('list').addEventListener('click', (e) => { const m = e.target.closest('[data-more-wish]'); if (m) { e.stopPropagation(); addAuthorMoreToWish(m.dataset.moreWish); } });
 
   // La testata si ritira scorrendo verso il basso e torna risalendo.
   let lastY = 0;
@@ -2824,6 +2920,7 @@ function init() {
       return;
     }
     if (btn.dataset.act === 'unclaim') { unclaimBook(b.id); return; }
+    if (btn.dataset.act === 'reveal') { claimRevealed.add(b.id); renderView(b); renderList(); return; }
     if (btn.dataset.act === 'returned') { b.loanTo = ''; b.loanDate = ''; }
     if (btn.dataset.act === 'bought') { const had = mediaOf(b); b.list = ''; b.media = ['paper', ...had]; if (!b.boughtAt) b.boughtAt = today(); }
     b.updatedAt = Date.now();
@@ -2958,6 +3055,7 @@ function init() {
   $('select-all').addEventListener('click', () => { for (const id of visibleIds) selected.add(id); renderList(); renderSelectBar(); });
   $('select-edit').addEventListener('click', () => { renderBulk(); show('bulk'); });
   $('bulk-close').addEventListener('click', () => { hide('bulk'); setSelecting(false); });
+  $('bulk-back').addEventListener('click', () => hide('bulk')); // si torna alla scelta dei libri, ancora selezionati
   $('bulk-owners').addEventListener('click', (e) => {
     const c = e.target.closest('[data-owner]'); if (!c) return;
     const o = c.dataset.owner, off = c.classList.contains('on');
@@ -3163,13 +3261,7 @@ function init() {
   };
   $('f-owner-add').addEventListener('click', addFormOwner);
   $('f-owner-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFormOwner(); } });
-  $('f-rating').addEventListener('click', (e) => {
-    const star = e.target.closest('[data-star]');
-    if (!star) return;
-    const n = Number(star.dataset.star);
-    current.rating = current.rating === n ? 0 : n;
-    renderFormRating();
-  });
+  bindStars($('f-rating'), () => current.rating, (v) => { current.rating = v; renderFormRating(); });
   $('f-loan-back').addEventListener('click', () => {
     $('f-loanTo').value = '';
     $('f-loanDate').value = '';
@@ -3208,13 +3300,7 @@ function init() {
     current.status = current.status === btn.dataset.status ? '' : btn.dataset.status;
     renderFormStatus();
   });
-  $('review-stars').addEventListener('click', (e) => {
-    const s = e.target.closest('[data-star]');
-    if (!s) return;
-    const n = Number(s.dataset.star);
-    reviewStars = reviewStars === n ? 0 : n;
-    renderReviewStars();
-  });
+  bindStars($('review-stars'), () => reviewStars, (v) => { reviewStars = v; renderReviewStars(); });
   $('review-save').addEventListener('click', saveReview);
   $('review-later').addEventListener('click', () => hide('review'));
   $('review').addEventListener('click', (e) => { if (e.target === $('review')) hide('review'); });
@@ -3269,6 +3355,13 @@ function init() {
     const w = e.target.closest('[data-who]'); if (w) { yearWho = w.dataset.who; renderYear(); return; }
     const y = e.target.closest('[data-year]'); if (y) { yearSel = Number(y.dataset.year); renderYear(); return; }
     const c = e.target.closest('[data-id]'); if (c) { const b = state.books.find((x) => x.id === c.dataset.id); if (b) openView(b); return; }
+    const au = e.target.closest('[data-author]');
+    if (au) {
+      hide('year'); viewMode = 'library'; backTo = null; $('search').value = '';
+      filterGenre = 'author:' + au.dataset.author; groupBy = '';
+      renderList(); window.scrollTo(0, 0);
+      return;
+    }
     if (e.target.closest('[data-undated]')) {
       hide('year'); viewMode = 'library'; backTo = null;
       filterGenre = 'status:read' + (yearWho ? '|owner:' + yearWho : '');
@@ -3278,7 +3371,13 @@ function init() {
       return;
     }
     if (e.target.closest('#goal-save')) {
-      const v = Math.max(0, Math.min(999, Math.round(Number($('goal-n').value) || 0)));
+      const raw = $('goal-n').value.trim();
+      if (!raw || !(Number(raw) >= 0)) {
+        $('goal-n').classList.remove('need'); void $('goal-n').offsetWidth; $('goal-n').classList.add('need');
+        $('goal-n').focus();
+        return toast('Scrivi prima quanti libri, poi tocca il pulsante.');
+      }
+      const v = Math.max(0, Math.min(999, Math.round(Number(raw))));
       state.goals = { ...(state.goals || {}), [goalKey(yearWho, yearSel)]: { n: v, at: Date.now() } };
       saveState(); renderYear();
       toast(v ? 'Obiettivo ' + yearSel + ': ' + v + ' libri.' : 'Obiettivo tolto.');

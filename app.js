@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 55; // va tenuto uguale al numero in version.json
+const APP_VERSION = 56; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -549,13 +549,28 @@ function bookRowHtml(b, attr) {
   </button>`;
 }
 
+function withGaps(books) {
+  const nums = books.map(seriesNumOf).filter(Boolean);
+  if (nums.length < 2) return books;
+  const max = Math.max(...nums), have = new Set(nums), out = [];
+  let i = 0;
+  const sorted = [...books];
+  for (let n = 1; n <= max; n++) {
+    while (i < sorted.length && (seriesNumOf(sorted[i]) || 999) <= n) out.push(sorted[i++]);
+    if (!have.has(n)) out.push({ ghost: true, num: n });
+  }
+  return out.concat(sorted.slice(i));
+}
+
 function gridCellHtml(b) {
+  if (b.ghost) return `<div class="cell ghost-cell" aria-label="Manca il numero ${b.num}"><span class="cell-cover"><span class="ghost-num">${b.num}</span><span class="ghost-txt">Manca</span></span></div>`;
+  if (b.more) return `<button class="cell more-cell" data-more="${esc(b.more)}"><span class="cell-cover"><span class="ghost-num">+${b.count}</span><span class="ghost-txt">Vedi tutti</span></span></button>`;
   const color = bookColor(b);
   const initial = esc((b.title || '?').trim().charAt(0).toUpperCase() || '?');
   const inner = b.cover
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-title">${esc(b.title || 'Senza titolo')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(b.authors))}</span>`;
-  return `<button class="cell${b.id === lastAddedId ? ' new' : ''}" data-id="${esc(b.id)}">
+  return `<button class="cell${b.id === lastAddedId ? ' new' : ''}${selecting && selected.has(b.id) ? ' sel' : ''}" data-id="${esc(b.id)}">
     <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${Number(b.rating) > 0 ? `<span class="rating-badge" role="img" aria-label="Voto ${Number(b.rating)} su 5"><b>★</b>${Number(b.rating)}</span>` : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
@@ -688,8 +703,53 @@ function renderArrange() {
   </section>`).join('') || '<p class="hint">Aggiungete qualche libro per vedere i suggerimenti.</p>';
 }
 
+/* Pagine speciali raggiunte da un tocco: tutti i libri di un autore, i volumi di una serie, i libri da sistemare. */
+const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const authorsOf = (b) => String(b.authors || '').split(/\s*,\s*/).filter(Boolean);
+const seriesNumOf = (b) => Number(b.seriesNum) || Number((String(b.subtitle || '').match(/\b(?:vol(?:ume)?|n|numero|tomo|libro)\.?\s*(\d+)/i) || [])[1]) || 0;
+const TODO = {
+  owner: ['Senza persona', (b) => !ownersOf(b).length],
+  genre: ['Senza genere', (b) => !(b.genres || []).length],
+  rating: ['Letti senza voto', (b) => b.status === 'read' && !Number(b.rating)],
+  place: ['Senza mobile', (b) => hasPaper(b) && !b.shelf],
+  series: ['Serie da completare', (b) => seriesSuggestions().has(b.id)],
+  dup: ['Possibili doppioni', (b) => duplicateIds().has(b.id)],
+};
+/* Libri con lo stesso titolo (accenti a parte) e un numero di volume, ma senza serie impostata: si propone la serie. */
+function seriesSuggestions() {
+  const groups = new Map();
+  for (const b of state.books.filter(isOwned)) {
+    const k = norm(b.title);
+    if (!k) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(b);
+  }
+  const out = new Map();
+  for (const items of groups.values()) {
+    if (items.length < 2 || !items.some((b) => !b.series || !b.seriesNum)) continue;
+    const name = items.find((b) => b.series)?.series || items[0].title;
+    for (const b of items) if (!b.series || !b.seriesNum) out.set(b.id, { series: name, num: seriesNumOf(b) });
+  }
+  return out;
+}
+/* Stesso ISBN, oppure stesso titolo, sottotitolo e autore: probabilmente lo stesso libro inserito due volte. */
+function duplicateIds() {
+  const seen = new Map(), dup = new Set();
+  for (const b of state.books.filter(isOwned)) {
+    for (const k of [b.isbn ? 'i' + b.isbn : '', 't' + norm(b.title) + '|' + norm(b.subtitle) + '|' + norm(b.authors)]) {
+      if (!k || k === 't||') continue;
+      if (seen.has(k)) { dup.add(b.id); dup.add(seen.get(k)); } else seen.set(k, b.id);
+    }
+  }
+  return dup;
+}
+const specialLabel = (f) => (f.startsWith('author:') ? 'Libri di ' + f.slice(7) : f.startsWith('series:') ? 'Serie: ' + f.slice(7) : f.startsWith('todo:') ? (TODO[f.slice(5)] || ['Da sistemare'])[0] : f);
+
 function matchesOne(b, f) {
   if (f === 'loan') return Boolean(b.loanTo);
+  if (f.startsWith('author:')) return authorsOf(b).includes(f.slice(7));
+  if (f.startsWith('series:')) return (b.series || '') === f.slice(7);
+  if (f.startsWith('todo:')) return TODO[f.slice(5)] ? TODO[f.slice(5)][1](b) : false;
   if (f.startsWith('media:')) return mediaOf(b).includes(f.slice(6));
   if (f.startsWith('theme:')) return (b.theme || '') === f.slice(6);
   if (f.startsWith('owner:')) return ownersOf(b).includes(f.slice(6));
@@ -700,6 +760,41 @@ function matchesOne(b, f) {
 function matchesFilter(b) { return filterParts().every((f) => matchesOne(b, f)); }
 
 /* Quante copertine stanno in una riga, con la grandezza scelta: serve a mettere ogni riga sulla sua mensola. */
+/* Selezione di più libri: si accende con «Seleziona», si toccano le copertine, poi «Modifica». */
+let selecting = false;
+let selected = new Set();
+function setSelecting(on) {
+  selecting = on;
+  selected = new Set();
+  document.body.classList.toggle('selecting', on);
+  renderSelectBar();
+  renderList();
+}
+function renderSelectBar() {
+  $('select-bar').hidden = !selecting;
+  $('select-count').textContent = selected.size === 1 ? '1 selezionato' : selected.size + ' selezionati';
+  $('select-edit').disabled = !selected.size;
+  $('btn-select').classList.toggle('on', selecting);
+}
+const selectedBooks = () => state.books.filter((b) => selected.has(b.id));
+function renderBulk() {
+  const books = selectedBooks();
+  const all = (test) => books.length > 0 && books.every(test);
+  $('bulk-title').textContent = books.length === 1 ? 'Modifica 1 libro' : 'Modifica ' + books.length + ' libri';
+  $('bulk-owners').innerHTML = state.owners.map((o) => `<button type="button" class="chip${all((b) => ownersOf(b).includes(o)) ? ' on' : ''}" data-owner="${esc(o)}">${esc(o)}</button>`).join('');
+  $('bulk-places').innerHTML = state.places.length ? state.places.map((p) => `<button type="button" class="chip${all((b) => b.shelf === p) ? ' on' : ''}" data-place="${esc(p)}">${esc(p)}</button>`).join('') : '<p class="hint">Nessun mobile: si creano dalle Impostazioni.</p>';
+  $('bulk-status').innerHTML = Object.keys(STATUS).map((k) => `<button type="button" data-status="${k}" class="${all((b) => b.status === k) ? 'on' : ''}">${STATUS[k]}</button>`).join('');
+  $('bulk-genres').innerHTML = state.genres.map((g) => `<button type="button" class="chip${all((b) => (b.genres || []).includes(g)) ? ' on' : ''}" data-genre="${esc(g)}">${esc(g)}</button>`).join('');
+  $('theme-options-bulk').innerHTML = [...new Set(state.books.map((b) => b.theme).filter(Boolean))].map((t) => `<option value="${esc(t)}">`).join('');
+  $('series-options-bulk').innerHTML = [...new Set(state.books.map((b) => b.series).filter(Boolean))].map((t) => `<option value="${esc(t)}">`).join('');
+}
+function bulkApply(change) {
+  for (const b of selectedBooks()) { change(b); b.updatedAt = Date.now(); }
+  saveState();
+  renderBulk();
+  renderList();
+}
+
 function gridCols() {
   const list = $('list');
   const cs = getComputedStyle(list);
@@ -749,17 +844,20 @@ function homeGroupsHtml(books, asGrid) {
   return head + groups.map(([label, items]) => `<section class="home-group"><p class="group-label">${esc(label)}<small>${items.length}</small></p>${body(items)}</section>`).join('');
 }
 const ALL_LABEL = '';
+const DICE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r="1.3"/><circle cx="15" cy="15" r="1.3"/><circle cx="15" cy="9" r="1.3"/><circle cx="9" cy="15" r="1.3"/></svg>';
+const railHead = (title, items) => `<div class="rail-head"><h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>${title === 'Da leggere' && items.length > 1 ? `<button class="chip pick-btn" data-pick>${DICE}Cosa leggo stasera?</button>` : ''}</div>`;
+const RAIL_MAX = 8;
 function railsHtml(owned) {
   return homeSections(owned).map(([title, items, empty]) => `<section class="rail-sec">
-    <h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>
-    ${items.length ? `<div class="rail" style="--rail-w:${[0, 98, 74, 58][gridZoom]}px">${items.map(gridCellHtml).join('')}</div>` : `<p class="rail-empty">${empty}</p>`}
+    ${railHead(title, items)}
+    ${items.length ? `<div class="rail" style="--rail-w:${[0, 98, 74, 58][gridZoom]}px">${(items.length > RAIL_MAX ? [...items.slice(0, RAIL_MAX), { more: title === 'Da leggere' ? 'status:toread' : 'status:reading', count: items.length - RAIL_MAX }] : items).map(gridCellHtml).join('')}</div>` : `<p class="rail-empty">${empty}</p>`}
     <div class="plank"></div>
   </section>`).join('') + ALL_LABEL;
 }
 function listSectionsHtml(owned) {
   return homeSections(owned).map(([title, items, empty]) => `<section class="list-sec">
-    <h3 class="rail-label">${title}${items.length ? `<small>${items.length}</small>` : ''}</h3>
-    ${items.length ? items.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('') : `<p class="rail-empty">${empty}</p>`}
+    ${railHead(title, items)}
+    ${items.length ? items.slice(0, 5).map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join('') + (items.length > 5 ? `<button class="link-btn more-row" data-more="${title === 'Da leggere' ? 'status:toread' : 'status:reading'}">Vedi tutti i ${items.length} →</button>` : '') : `<p class="rail-empty">${empty}</p>`}
   </section>`).join('') + ALL_LABEL;
 }
 
@@ -815,6 +913,27 @@ function openDiscover(i) {
   openBook({ title: it.title || '', authors: it.authors || '', cover: it.cover ? httpsUrl(it.cover) : '', genres: [] }, { banner: it.reason ? 'Suggerito da Claude: ' + it.reason : '' });
 }
 
+/* «Cosa leggo stasera?»: pesca a caso tra i Da leggere (rispettando il filtro attivo), anche per lunghezza. */
+let pickLen = '', pickId = '';
+function pickPool() {
+  return state.books.filter((b) => isOwned(b) && b.status === 'toread' && matchesFilter(b) && (!pickLen
+    || (pickLen === 'short' ? (Number(b.pages) || 300) < 250 : pickLen === 'long' ? (Number(b.pages) || 0) >= 400 : true)));
+}
+function openPick(again) {
+  const pool = pickPool().filter((b) => b.id !== pickId || pickPool().length === 1);
+  const b = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  pickId = b ? b.id : '';
+  $('pick-lens').innerHTML = [['', 'Qualsiasi'], ['short', 'Breve'], ['long', 'Lungo']].map(([k, l]) => `<button data-len="${k}" class="${pickLen === k ? 'on' : ''}">${l}</button>`).join('');
+  $('pick-book').innerHTML = b
+    ? `${coverHtml(b, true)}<div><h2>${esc(b.title)}</h2><p class="hint">${esc(b.authors || '')}${b.pages ? ' · ' + esc(b.pages) + ' pagine' : ''}</p></div>`
+    : '<p class="hint">Nessun libro da leggere con questa scelta.</p>';
+  $('pick-start').disabled = !b;
+  $('pick-open').disabled = !b;
+  $('pick-card').style.setProperty('--book', b ? bookColor(b) : 'var(--surface)');
+  if (!again) show('pick');
+  if (again && b) { const c = $('pick-book'); c.classList.remove('spin'); void c.offsetWidth; c.classList.add('spin'); }
+}
+
 function greeting() {
   const h = new Date().getHours();
   const word = h >= 5 && h < 13 ? 'Buongiorno' : h >= 13 && h < 18 ? 'Buon pomeriggio' : 'Buonasera';
@@ -842,6 +961,10 @@ function renderList() {
   if (sort === 'title') books.sort(byText('title'));
   else if (sort === 'author') books.sort(byText('authors'));
   else books.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  const seriesPage = !wish && !audio && filterParts().find((p) => p.startsWith('series:'));
+  const authorPage = !wish && !audio && filterParts().find((p) => p.startsWith('author:'));
+  if (seriesPage) books.sort((a, b) => (seriesNumOf(a) || 999) - (seriesNumOf(b) || 999));
+  else if (authorPage) books.sort((a, b) => (Number(a.year) || 9999) - (Number(b.year) || 9999));
 
   $('tab-library').textContent = 'Libreria (' + owned.length + ')';
   $('tab-wish').textContent = 'Desideri (' + wished.length + ')';
@@ -897,6 +1020,9 @@ function renderList() {
       ['Tema', themes.map((t) => ['theme:' + t, t, count((b) => b.theme === t, 'theme')])],
       ['Genere', used.map((g) => ['genre:' + g, g, count((b) => (b.genres || []).includes(g), 'genre')])],
     ].map(([title, items]) => [title, items.filter(([v, , n]) => n || parts.includes(v))]).filter(([, items]) => items.length);
+    // Autore, serie e «da sistemare» non stanno tra le scelte del pannello, ma restano accesi finché non si tolgono.
+    const special = parts.filter((p) => /^(author|series|todo):/.test(p)).map((p) => [p, specialLabel(p), count(() => true, filterKind(p))]);
+    if (special.length) filterGroups.unshift(['Pagina', special]);
     const all = filterGroups.flatMap(([, items]) => items);
     const chosen = all.filter(([v]) => parts.includes(v));
     if (chosen.length !== parts.length) filterGenre = chosen.map(([v]) => v).join('|');
@@ -930,16 +1056,18 @@ function renderList() {
       const home = !wish && !audio && viewKind === 'grid';
       // Copertine e lista hanno le stesse sezioni, nello stesso ordine.
       // Stesse sezioni anche filtrando per persona, genere, tema…: non se il filtro è già sullo stato di lettura.
-      const sections = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped
-        && !filterParts().some((p) => p.startsWith('status:')) && (filterGenre ? homeSections(books).length > 0 : owned.length >= 6);
+      const sections = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped && !seriesPage && !authorPage
+        && !filterParts().some((p) => /^(status|todo):/.test(p)) && (filterGenre ? homeSections(books).length > 0 : owned.length >= 6);
       owned = filterGenre ? books : owned;
       // «Tutti i libri» si divide come lo Scaffale quando si guarda la libreria nell'ordine normale.
-      const split = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped;
+      const split = !wish && !audio && viewKind !== 'shelf' && !q && sort === 'recent' && !grouped && !seriesPage && !authorPage;
+      // Nella pagina di una serie i volumi mancanti compaiono come posti vuoti: «Manca il n. 3».
+      const shown = seriesPage ? withGaps(books) : books;
       homeOrder = null;
-      $('list').innerHTML = home ? (sections ? railsHtml(owned) : '') + (split ? homeGroupsHtml(books, true) : shelfRowsHtml(books))
+      $('list').innerHTML = home ? (sections ? railsHtml(owned) : '') + (split ? homeGroupsHtml(books, true) : shelfRowsHtml(shown))
         : viewKind === 'grid' ? books.map(gridCellHtml).join('')
         : viewKind === 'shelf' ? shelvesHtml(wish ? books : books.filter(hasPaper), wish, grouped ? (groupBy === 'owner' ? 'owner' : 'genre') : '')
-        : (sections ? listSectionsHtml(owned) : '') + (split ? homeGroupsHtml(books, false) : books.map((b) => bookRowHtml(b, `data-id="${esc(b.id)}"`)).join(''));
+        : (sections ? listSectionsHtml(owned) : '') + (split ? homeGroupsHtml(books, false) : shown.map((b) => (b.ghost ? `<div class="book ghost-row"><span class="cover">${b.num}</span><span class="book-info"><span class="book-title">Manca il n. ${b.num}</span><span class="book-author">Non è tra i vostri libri</span></span></div>` : bookRowHtml(b, `data-id="${esc(b.id)}"`))).join(''));
       if (homeOrder) books = homeOrder;
     }
   }
@@ -977,6 +1105,7 @@ document.addEventListener('error', (e) => {
 let peekId = '';
 
 function openPeek(id, anchor) {
+  if (selecting) return;
   const b = state.books.find((x) => x.id === id);
   if (!b) return;
   peekId = id;
@@ -1060,6 +1189,7 @@ function renderView(b) {
     ...ownersOf(b).map((o) => [o, own ? 'owner:' + o : '']),
     ...(mediaOf(b).length > 1 || !hasPaper(b) ? mediaOf(b).map((m) => [MEDIA[m], own ? 'media:' + m : '']) : []),
     ...(b.theme ? [['Tema: ' + b.theme, own ? 'theme:' + b.theme : '']] : []),
+    ...(b.series ? [['Serie: ' + b.series + (seriesNumOf(b) ? ' · n. ' + seriesNumOf(b) : ''), own ? 'series:' + b.series : '']] : []),
     ...(b.shelf ? [[b.shelf + (b.shelfRow ? ', ripiano ' + b.shelfRow : ''), own ? 'place:' + b.shelf : '']] : [])];
   const facts = [
     ['Letto nel', b.status === 'read' && b.readAt ? showRead(b.readAt) : ''],
@@ -1079,7 +1209,7 @@ function renderView(b) {
         <div class="hero-text">
           <h2>${esc(b.title || 'Senza titolo')}</h2>
           ${b.subtitle ? `<span class="hero-sub">${esc(b.subtitle)}</span>` : ''}
-          ${b.authors ? `<span class="hero-author">${esc(b.authors)}</span>` : ''}
+          ${b.authors ? `<span class="hero-author">${authorsOf(b).map((a) => (own ? `<button class="author-link" data-goto="author:${esc(a)}">${esc(a)}</button>` : esc(a))).join(', ')}</span>` : ''}
           ${b.rating ? `<span class="hero-stars" role="img" aria-label="${b.rating} stelle su 5">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</span>` : ''}
         </div>
       </div>
@@ -1090,6 +1220,7 @@ function renderView(b) {
     ${b.plot ? `<p class="view-label">Trama</p><p class="plot${b.plot.length > 320 ? ' clamp' : ''}" id="view-plot">${esc(b.plot)}</p>${b.plot.length > 320 ? '<button class="link-btn" data-act="plot">Leggi tutto</button>' : ''}` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
+    ${quotesHtml(b)}
     ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
     <div class="view-actions">
       ${b.loanTo ? '<button class="btn primary wide" data-act="returned">È tornato a casa</button>' : ''}
@@ -1097,6 +1228,17 @@ function renderView(b) {
       ${b.status === 'read' && !b.readAt ? '<button class="btn ghost wide" data-act="readdate">Aggiungi quando l\'hai letto</button>' : ''}
       ${b.list && !(Number(b.price) > 0) ? '<button class="btn ghost wide" data-act="price">Aggiungi il prezzo di copertina</button>' : ''}
     </div>`;
+}
+
+/* Citazioni: le frasi che vi sono rimaste, con la pagina. */
+let quoteOpen = false;
+function quotesHtml(b) {
+  const qs = Array.isArray(b.quotes) ? b.quotes : [];
+  return `<p class="view-label">Citazioni${qs.length ? ' · ' + qs.length : ''}</p>
+    ${qs.map((q) => `<blockquote class="quote"><p>${esc(q.text)}</p><footer>${q.page ? 'p. ' + esc(q.page) : ''}<button class="link-btn" data-act="quote-del" data-quote="${esc(q.id)}" aria-label="Elimina la citazione">Elimina</button></footer></blockquote>`).join('')}
+    ${quoteOpen ? `<div class="quote-form"><textarea id="quote-text" rows="3" placeholder="La frase che vuoi ricordare"></textarea>
+      <div class="row"><input id="quote-page" type="text" inputmode="numeric" placeholder="Pagina" aria-label="Pagina"><button class="btn ghost" data-act="quote-cancel">Annulla</button><button class="btn primary" data-act="quote-save">Salva</button></div></div>`
+      : '<button class="btn ghost wide" data-act="quote-add">Aggiungi una citazione</button>'}`;
 }
 
 /* ================= 6. SCHEDA LIBRO ================= */
@@ -1890,8 +2032,20 @@ function renderInstall() {
        <p class="hint">Su Android l'app dall'icona usa gli stessi dati di Chrome: ritrovi tutti i libri.</p>`;
 }
 
+function renderTodo() {
+  const owned = state.books.filter(isOwned);
+  const rows = Object.entries(TODO).map(([k, [label, test]]) => [k, label, owned.filter(test).length]).filter(([k, , n]) => n && !(k === 'place' && !state.places.length));
+  const sugg = seriesSuggestions();
+  $('todo-box').innerHTML = rows.length
+    ? rows.map(([k, label, n]) => `<button class="todo-row" data-todo="${k}"><span>${label}</span><b>${n}</b></button>`).join('')
+      + (sugg.size ? `<button class="btn ghost wide" id="todo-series-fix">Completa le serie in automatico (${sugg.size} ${sugg.size === 1 ? 'libro' : 'libri'})</button>` : '')
+    : '<p class="hint">Tutto in ordine: nessun libro da sistemare.</p>';
+  $('btn-settings').classList.toggle('has-dot', rows.some(([k]) => k === 'genre' || k === 'dup' || k === 'series'));
+}
+
 function renderSettings() {
   renderInstall();
+  renderTodo();
   if (typeof renderCloud === 'function') renderCloud();
   const n = state.books.length;
   $('settings-info').textContent = (n === 1 ? '1 libro salvato' : n + ' libri salvati')
@@ -2072,7 +2226,7 @@ function hide(id) { $(id).hidden = true; scheduleBackSync(); }
    Il gesto o il tasto indietro chiude prima ciò che è aperto sopra l'elenco (anteprima, scheda,
    modulo, scanner…), poi l'elenco filtrato da un'etichetta, e solo alla fine esce dall'app.
    Si ottiene tenendo nella cronologia del browser una voce "di guardia" finché qualcosa è aperto. */
-const LAYERS = ['review', 'book', 'view', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
+const LAYERS = ['pick', 'review', 'bulk', 'book', 'view', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
 let backGuard = false;
 let backPending = false;
 let backQueued = false;
@@ -2311,6 +2465,7 @@ function init() {
       if (target.startsWith('list:')) { viewMode = 'wish'; filterList = target.slice(5); }
       else { viewMode = 'library'; filterGenre = target; }
       groupBy = target.startsWith('owner:') ? 'genre' : target.startsWith('genre:') ? 'owner' : '';
+      quoteOpen = false;
       groupFor = target;
       renderList();
       window.scrollTo(0, 0);
@@ -2333,6 +2488,22 @@ function init() {
     const btn = e.target.closest('[data-act]');
     const b = btn && state.books.find((x) => x.id === viewId);
     if (!b) return;
+    if (btn.dataset.act.startsWith('quote-')) {
+      const act = btn.dataset.act;
+      if (act === 'quote-add') { quoteOpen = true; renderView(b); setTimeout(() => $('quote-text').focus(), 30); return; }
+      if (act === 'quote-cancel') { quoteOpen = false; renderView(b); return; }
+      if (act === 'quote-save') {
+        const text = $('quote-text').value.trim();
+        if (!text) return toast('Scrivi la frase da ricordare.');
+        b.quotes = [...(b.quotes || []), { id: newId(), text, page: $('quote-page').value.trim(), at: Date.now() }];
+      }
+      if (act === 'quote-del') b.quotes = (b.quotes || []).filter((q) => q.id !== btn.dataset.quote);
+      quoteOpen = false;
+      b.updatedAt = Date.now();
+      saveState();
+      renderView(b);
+      return;
+    }
     if (btn.dataset.act === 'plot') {
       const clamped = $('view-plot').classList.toggle('clamp');
       btn.textContent = clamped ? 'Leggi tutto' : 'Mostra meno';
@@ -2431,6 +2602,95 @@ function init() {
   });
   applyTheme('night'); // il tema Giorno è stato tolto: resta solo Sera
   refreshColors();
+  // In modalità selezione un tocco sceglie o toglie il libro, invece di aprirlo.
+  $('list').addEventListener('click', (e) => {
+    const more = e.target.closest('[data-more]');
+    if (more) { e.stopImmediatePropagation(); filterGenre = more.dataset.more; renderList(); window.scrollTo(0, 0); return; }
+    const pick = e.target.closest('[data-pick]');
+    if (pick) { e.stopImmediatePropagation(); openPick(); return; }
+    if (!selecting) return;
+    const el = e.target.closest('[data-id]');
+    e.stopImmediatePropagation();
+    if (!el) return;
+    if (selected.has(el.dataset.id)) selected.delete(el.dataset.id); else selected.add(el.dataset.id);
+    document.querySelectorAll(`#list [data-id="${CSS.escape(el.dataset.id)}"]`).forEach((n) => n.classList.toggle('sel', selected.has(el.dataset.id)));
+    renderSelectBar();
+  }, true);
+  $('btn-select').addEventListener('click', () => setSelecting(!selecting));
+  $('todo-box').addEventListener('click', (e) => {
+    if (e.target.closest('#todo-series-fix')) {
+      const sugg = seriesSuggestions();
+      for (const b of state.books) {
+        const s = sugg.get(b.id);
+        if (!s) continue;
+        b.series = b.series || s.series;
+        if (!b.seriesNum && s.num) b.seriesNum = String(s.num);
+        b.updatedAt = Date.now();
+      }
+      saveState();
+      renderTodo();
+      renderList();
+      return toast('Serie completate: ' + sugg.size + (sugg.size === 1 ? ' libro.' : ' libri.'));
+    }
+    const row = e.target.closest('[data-todo]');
+    if (!row) return;
+    hide('settings');
+    viewMode = 'library';
+    filterGenre = 'todo:' + row.dataset.todo;
+    renderList();
+    window.scrollTo(0, 0);
+  });
+  $('pick-again').addEventListener('click', () => openPick(true));
+  $('pick-close').addEventListener('click', () => hide('pick'));
+  $('pick').addEventListener('click', (e) => { if (e.target === $('pick')) hide('pick'); });
+  $('pick-lens').addEventListener('click', (e) => { const c = e.target.closest('[data-len]'); if (!c) return; pickLen = c.dataset.len; openPick(true); });
+  $('pick-open').addEventListener('click', () => { const b = state.books.find((x) => x.id === pickId); hide('pick'); if (b) openView(b); });
+  $('pick-start').addEventListener('click', () => {
+    const b = state.books.find((x) => x.id === pickId);
+    if (!b) return;
+    setStatus(b, 'reading'); b.updatedAt = Date.now(); saveState(); hide('pick'); renderList();
+    toast('«' + b.title + '» è sul comodino. Buona lettura!');
+  });
+  $('select-cancel').addEventListener('click', () => setSelecting(false));
+  $('select-all').addEventListener('click', () => { for (const id of visibleIds) selected.add(id); renderList(); renderSelectBar(); });
+  $('select-edit').addEventListener('click', () => { renderBulk(); show('bulk'); });
+  $('bulk-close').addEventListener('click', () => { hide('bulk'); setSelecting(false); });
+  $('bulk-owners').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-owner]'); if (!c) return;
+    const o = c.dataset.owner, off = c.classList.contains('on');
+    bulkApply((b) => { const s = new Set(ownersOf(b)); if (off) s.delete(o); else s.add(o); b.owners = state.owners.filter((x) => s.has(x)); delete b.owner; });
+  });
+  $('bulk-places').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-place]'); if (!c) return;
+    const p = c.classList.contains('on') ? '' : c.dataset.place;
+    bulkApply((b) => { b.shelf = p; if (!p) b.shelfRow = ''; });
+  });
+  $('bulk-status').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-status]'); if (!c) return;
+    const s = c.classList.contains('on') ? '' : c.dataset.status;
+    bulkApply((b) => setStatus(b, s));
+  });
+  $('bulk-genres').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-genre]'); if (!c) return;
+    const g = c.dataset.genre, off = c.classList.contains('on');
+    bulkApply((b) => { const s = new Set(b.genres || []); if (off) s.delete(g); else s.add(g); b.genres = state.genres.filter((x) => s.has(x)); });
+  });
+  $('bulk-theme-go').addEventListener('click', () => { const t = $('bulk-theme').value.trim(); bulkApply((b) => { b.theme = t; }); toast(t ? 'Tema «' + t + '» assegnato.' : 'Tema tolto.'); });
+  $('bulk-series-go').addEventListener('click', () => {
+    const s = $('bulk-series').value.trim();
+    bulkApply((b) => { b.series = s; if (s && !b.seriesNum && seriesNumOf(b)) b.seriesNum = String(seriesNumOf(b)); if (!s) b.seriesNum = ''; });
+    toast(s ? 'Serie «' + s + '» assegnata: il numero è preso dal sottotitolo dove c\'è.' : 'Serie tolta.');
+  });
+  $('bulk-delete').addEventListener('click', () => {
+    const n = selected.size;
+    if (!n || !window.confirm('Eliminare ' + (n === 1 ? '1 libro' : n + ' libri') + '? Non si può annullare.')) return;
+    state.books = state.books.filter((b) => !selected.has(b.id));
+    saveState();
+    hide('bulk');
+    setSelecting(false);
+    toast(n === 1 ? '1 libro eliminato.' : n + ' libri eliminati.');
+  });
+
   $('list').addEventListener('click', (e) => {
     if (press.fired) { press.fired = false; return; }
     const row = e.target.closest('[data-id]');

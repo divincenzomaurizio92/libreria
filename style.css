@@ -731,3 +731,55 @@ body::before {
 .z3 .cell-cover:has(.rating-badge) .badge:not(.loan-badge) + .badge.loan-badge { bottom: 42px; }
 /* il saluto può andare a capo invece di essere tagliato («Buon pomeriggio Maurizio») */
 .top .count { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; font-size: 15px; }
+
+/* ================= v56 ================= */
+/* Vedi tutti e posti vuoti delle serie */
+.ghost-cell .cell-cover, .more-cell .cell-cover { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: none !important; border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: none; }
+.ghost-cell .cell-cover::after, .more-cell .cell-cover::after { display: none; }
+.ghost-num { font: 600 26px/1 var(--font-display); color: var(--accent); }
+.ghost-txt { font: 600 11px/1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.more-cell .cell-cover { border-style: solid; background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
+.z3 .ghost-num { font-size: 18px; }
+.ghost-row { opacity: .7; }
+.ghost-row .cover { display: grid; place-items: center; border: 1.5px dashed var(--line); background: none; color: var(--accent); font: 600 20px/1 var(--font-display); }
+.more-row { display: block; margin: 6px 0 10px; }
+.rail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.rail-head .rail-label { margin: 0; }
+.pick-btn { min-height: 32px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.pick-btn svg, .select-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pick-btn svg circle { fill: currentColor; stroke: none; }
+/* Autore toccabile */
+.author-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; cursor: pointer; }
+/* Citazioni */
+.quote { margin: 0 0 12px; padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.quote p { margin: 0 0 6px; font: italic 500 16px/1.45 var(--font-display); }
+.quote footer { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }
+.quote-form textarea { width: 100%; margin-bottom: 8px; }
+.quote-form .row input { flex: 1; min-width: 0; }
+/* Selezione */
+.select-btn { padding: 0 10px; min-width: 42px; justify-content: center; }
+.select-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.selecting .cell .cell-cover::before { content: ''; position: absolute; z-index: 3; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0, 0, 0, .35); box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.selecting .cell.sel .cell-cover::before { background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231F1712' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4 8-9'/%3E%3C/svg%3E") center / 14px no-repeat; border-color: var(--accent); }
+.selecting .cell.sel .cell-cover { outline: 3px solid var(--accent); outline-offset: 2px; }
+.selecting .book[data-id].sel { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 10px; }
+.selecting .bottom { display: none; }
+.select-bar { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 30; display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 16px; background: var(--surface); border: 1px solid var(--accent); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+.select-bar[hidden] { display: none; }
+.select-bar span { flex: 1; text-align: center; font-weight: 600; }
+.btn.danger { color: #E07A5F; border-color: color-mix(in srgb, #E07A5F 50%, transparent); }
+/* Da sistemare */
+.todo-row { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 46px; padding: 0 14px; margin-bottom: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 500 15px/1 var(--font-body); cursor: pointer; }
+.todo-row b { min-width: 28px; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink); text-align: center; }
+.icon-btn.has-dot { position: relative; }
+.icon-btn.has-dot::after { content: ''; position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+/* Cosa leggo stasera */
+#pick { z-index: 45; align-items: center; }
+#pick-card { width: min(380px, 100%); display: grid; gap: 12px; }
+#pick-card .rail-label { margin: 0; }
+.pick-book { display: flex; gap: 14px; align-items: center; min-height: 140px; }
+.pick-book .cover { width: 92px; flex: 0 0 92px; }
+.pick-book h2 { margin: 0 0 4px; font: 600 20px/1.2 var(--font-display); }
+.pick-book.spin { animation: pickspin .35s ease; }
+@keyframes pickspin { from { opacity: 0; transform: translateY(8px) rotate(-1.5deg); } to { opacity: 1; transform: none; } }
+#pick-card .row .btn { flex: 1; }

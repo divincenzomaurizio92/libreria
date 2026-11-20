@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 56; // va tenuto uguale al numero in version.json
+const APP_VERSION = 57; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -516,6 +516,7 @@ function toggleFilter(v) {
 }
 let viewMode = 'library'; // 'library' = libri posseduti, 'wish' = liste desideri
 let filterList = '';
+let claims = {}; // libri dei desideri prenotati da chi ha il link della lista: id libro → { name, id }
 
 function coverHtml(book, big) {
   const initial = esc((book.title || '?').trim().charAt(0).toUpperCase() || '?');
@@ -535,6 +536,7 @@ function bookRowHtml(b, attr) {
   const tags = (b.status === 'reading' ? '<span class="tag reading">In corso</span>' : b.status === 'toread' ? '<span class="tag">Da leggere</span>' : '')
     + (b.loanTo ? `<span class="tag loan">Prestato a ${esc(b.loanTo)}</span>` : '')
     + (b.list ? `<span class="tag wish">${esc(b.list)}</span>` : '')
+    + (b.list && claims[b.id] ? `<span class="tag claim">🎁 Lo prende ${esc(claims[b.id].name)}</span>` : '')
     + ownersOf(b).map((o) => `<span class="tag">${esc(o)}</span>`).join('')
     + (b.genres || []).map((g) => `<span class="tag">${esc(g)}</span>`).join('');
   return `<button class="book" ${attr}>
@@ -571,7 +573,7 @@ function gridCellHtml(b) {
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-title">${esc(b.title || 'Senza titolo')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(b.authors))}</span>`;
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}${selecting && selected.has(b.id) ? ' sel' : ''}" data-id="${esc(b.id)}">
-    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${Number(b.rating) > 0 ? `<span class="rating-badge" role="img" aria-label="Voto ${Number(b.rating)} su 5"><b>★</b>${Number(b.rating)}</span>` : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${b.list && claims[b.id] ? `<span class="badge claim-badge">🎁 ${esc(claims[b.id].name)}</span>` : ''}${Number(b.rating) > 0 ? `<span class="rating-badge" role="img" aria-label="Voto ${Number(b.rating)} su 5"><b>★</b>${Number(b.rating)}</span>` : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
   </button>`;
@@ -934,6 +936,80 @@ function openPick(again) {
   if (again && b) { const c = $('pick-book'); c.classList.remove('spin'); void c.offsetWidth; c.classList.add('spin'); }
 }
 
+/* ---------- Anno in libri e obiettivo ----------
+   «Letto nel» può essere un anno (2019) o una data (12/03/2026): se ne prende l'anno, e il mese quando c'è.
+   Un libro conta per le persone di «Di chi è»; senza persone conta solo in «Tutti». */
+let yearWho = null, yearSel = new Date().getFullYear();
+const readYear = (b) => { const m = String(b.readAt || '').match(/(?:^|\D)((?:19|20)\d{2})(?:\D|$)/); return m ? Number(m[1]) : 0; };
+const readMonth = (b) => {
+  const v = String(b.readAt || '');
+  let m = v.match(/^(\d{4})-(\d{2})-\d{2}$/); if (m) return Number(m[2]);
+  m = v.match(/^\d{1,2}[/.-](\d{1,2})[/.-]\d{4}$/); return m ? Number(m[1]) : 0;
+};
+const goalKey = (who, year) => (who || 'Tutti') + '|' + year;
+const goalOf = (who, year) => Number(((state.goals || {})[goalKey(who, year)] || {}).n) || 0;
+
+function renderYear() {
+  if (yearWho === null) { const me = pref('libreria.me', ''); yearWho = state.owners.includes(me) ? me : ''; }
+  if (yearWho && !state.owners.includes(yearWho)) yearWho = '';
+  const now = new Date(), thisYear = now.getFullYear();
+  const mine = state.books.filter((b) => !b.list && b.status === 'read' && (!yearWho || ownersOf(b).includes(yearWho)));
+  const years = [...new Set([thisYear, ...mine.map(readYear).filter(Boolean)])].sort((a, b) => b - a);
+  if (!years.includes(yearSel)) yearSel = thisYear;
+  const read = mine.filter((b) => readYear(b) === yearSel).sort((a, b) => (readMonth(b) - readMonth(a)) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  const undated = mine.filter((b) => !readYear(b)).length;
+  const goal = goalOf(yearWho, yearSel);
+  const n = read.length;
+  const pages = read.reduce((t, b) => t + (Number(b.pages) || 0), 0);
+  const rated = read.filter((b) => b.rating);
+  const avg = rated.length ? rated.reduce((t, b) => t + Number(b.rating), 0) / rated.length : 0;
+  const top = (list) => { const c = {}; list.forEach((x) => { if (x) c[x] = (c[x] || 0) + 1; }); return Object.entries(c).sort((a, b) => b[1] - a[1])[0] || null; };
+  const genre = top(read.flatMap((b) => b.genres || []));
+  const author = top(read.map((b) => (authorsOf(b)[0] || '')));
+  const longest = read.filter((b) => Number(b.pages)).sort((a, b) => b.pages - a.pages)[0];
+  const heard = read.filter((b) => mediaOf(b).includes('audio') && !hasPaper(b)).length;
+  const best = rated.filter((b) => b.rating >= 4).sort((a, b) => b.rating - a.rating).slice(0, 3);
+  const months = Array.from({ length: 12 }, (_, i) => read.filter((b) => readMonth(b) === i + 1).length);
+  const maxM = Math.max(1, ...months);
+
+  // Obiettivo: quanti ne mancano e, per l'anno in corso, se si è in linea con il calendario.
+  let goalHtml;
+  if (goal) {
+    const pct = Math.min(100, Math.round((n / goal) * 100));
+    let pace = '';
+    if (yearSel === thisYear && n < goal) {
+      const day = (now - new Date(thisYear, 0, 1)) / 86400000 + 1;
+      const expected = Math.floor((goal * day) / 365);
+      pace = n >= expected ? (yearWho ? ' · sei in linea' : ' · siete in linea') : ' · a quest\'ora dell\'anno sarebbero ' + expected + ' per stare in linea';
+    }
+    goalHtml = `<div class="goal"><div class="goal-top"><strong>${n} su ${goal}</strong><span>${n >= goal ? 'Obiettivo raggiunto! 🎉' : 'ne mancano ' + (goal - n) + pace}</span></div>
+      <div class="goal-bar"><i style="width:${pct}%"></i></div></div>`;
+  } else {
+    goalHtml = `<p class="hint">Nessun obiettivo per il ${yearSel}${yearWho ? ' per ' + esc(yearWho) : ''}: quanti libri ${yearWho ? 'vuoi' : 'volete'} leggere?</p>`;
+  }
+  const cell = (label, value) => (value ? `<div class="ystat"><span>${label}</span><strong>${value}</strong></div>` : '');
+  $('year-body').innerHTML = `
+    <div class="seg year-who">${[['', 'Tutti'], ...state.owners.map((o) => [o, o])].map(([v, l]) => `<button data-who="${esc(v)}" class="${yearWho === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>
+    <div class="chips year-years">${years.map((y) => `<button class="chip${y === yearSel ? ' on' : ''}" data-year="${y}">${y}</button>`).join('')}</div>
+    <div class="year-hero"><span class="year-n">${n}</span><span>${n === 1 ? 'libro letto' : 'libri letti'} nel ${yearSel}${yearWho ? ' da ' + esc(yearWho) : ''}</span></div>
+    ${goalHtml}
+    <div class="goal-set"><input id="goal-n" type="number" inputmode="numeric" min="0" max="999" placeholder="Obiettivo" value="${goal || ''}" aria-label="Obiettivo di libri per il ${yearSel}"><button class="btn ghost" id="goal-save">${goal ? 'Cambia obiettivo' : 'Imposta obiettivo'}</button></div>
+    ${n ? `<div class="ystats">
+      ${cell('Pagine lette', pages ? pages.toLocaleString('it-IT') : '')}
+      ${cell('Voto medio', avg ? avg.toFixed(1).replace('.', ',') + ' ★' : '')}
+      ${cell('Genere preferito', genre ? esc(genre[0]) : '')}
+      ${cell('Autore più letto', author && author[1] > 1 ? esc(author[0]) + ' (' + author[1] + ')' : '')}
+      ${cell('Il più lungo', longest ? esc(longest.title) + ' · ' + longest.pages + ' pag.' : '')}
+      ${cell('Ascoltati su Audible', heard || '')}
+    </div>` : ''}
+    ${months.some(Boolean) ? `<h3>Mese per mese</h3><div class="months">${months.map((m, i) => `<div class="month"><i style="height:${Math.round((m / maxM) * 100)}%"></i><b>${m || ''}</b><span>${'GFMAMGLASOND'[i]}</span></div>`).join('')}</div>` : ''}
+    ${best.length ? `<h3>I più amati</h3><div class="year-covers">${best.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}<span>${'★'.repeat(b.rating)}</span></button>`).join('')}</div>` : ''}
+    ${n ? `<h3>Tutti i letti del ${yearSel}</h3><div class="year-covers">${read.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}</button>`).join('')}</div>`
+      : `<div class="empty"><strong>Ancora nessun libro letto nel ${yearSel}</strong>Quando segnate un libro come «Letto», qui compare con la sua copertina.</div>`}
+    ${undated ? `<p class="hint">${undated === 1 ? '1 libro letto non ha' : undated + ' libri letti non hanno'} l'anno in «Letto nel», quindi non ${undated === 1 ? 'compare' : 'compaiono'} qui. <button class="link-btn" data-undated>Mostrali</button></p>` : ''}
+    <p class="hint">Contano i libri segnati «Letto» con l'anno in «Letto nel». Ogni libro vale per le persone di «Di chi è».</p>`;
+}
+
 function greeting() {
   const h = new Date().getHours();
   const word = h >= 5 && h < 13 ? 'Buongiorno' : h >= 13 && h < 18 ? 'Buon pomeriggio' : 'Buonasera';
@@ -996,6 +1072,8 @@ function renderList() {
     if (filterList && !state.wishlists.includes(filterList)) filterList = '';
     $('filters').innerHTML = state.wishlists.length
       ? chip('', 'Tutte', !filterList) + state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')
+        // Con una lista scelta si può mandarne il link a parenti e amici.
+        + (filterList ? `<button class="chip share-chip" data-share><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/></svg>Condividi</button>` : '')
       : '';
   } else if (audio) {
     $('filters').innerHTML = '';
@@ -1222,6 +1300,7 @@ function renderView(b) {
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
     ${quotesHtml(b)}
     ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
+    ${b.list && claims[b.id] ? `<p class="view-claim">🎁 Lo prende <strong>${esc(claims[b.id].name)}</strong>, dal link della lista. <button class="link-btn" data-act="unclaim">Rendilo di nuovo libero</button></p>` : ''}
     <div class="view-actions">
       ${b.loanTo ? '<button class="btn primary wide" data-act="returned">È tornato a casa</button>' : ''}
       ${b.list ? '<button class="btn primary wide" data-act="bought">Comprato: sposta in libreria</button>' : ''}
@@ -1423,6 +1502,7 @@ function openReview(b) {
   reviewStars = Number(b.rating) || 0;
   $('review-title').textContent = 'Com\'era «' + (b.title || 'questo libro') + '»?';
   $('review-text').value = b.notes || '';
+  $('review-when').value = b.readAt || '';
   $('review-card').style.setProperty('--book', bookColor(b));
   renderReviewStars();
   show('review');
@@ -1432,6 +1512,7 @@ function saveReview() {
   if (b) {
     b.rating = reviewStars;
     b.notes = $('review-text').value.trim();
+    if (b.status === 'read') b.readAt = $('review-when').value.trim(); // serve all'anno in libri e all'obiettivo
     b.updatedAt = Date.now();
     saveState();
     renderList();
@@ -1754,8 +1835,31 @@ function batchCode(isbn, code) {
   runBatch();
 }
 
+const want0 = (item) => state.books.find((x) => x.id === item.id);
 async function batchLookup(item) {
   let found = null, failed = false;
+  if (!item.isbn && item.q) {
+    // Libro importato senza ISBN: si cerca per titolo e autore, e si prende il primo con lo stesso titolo.
+    try {
+      const want = state.books.find((x) => x.id === item.id);
+      const t = norm((want && want.title) || '');
+      found = (await searchByText(item.q)).find((x) => t && (norm(x.title).startsWith(t) || t.startsWith(norm(x.title)))) || null;
+      if (found && found.isbn && state.books.some((x) => x.isbn === found.isbn && x.id !== item.id)) found.isbn = '';
+    } catch (e) { failed = true; }
+    const b = want0(item);
+    if (b && found) {
+      if (!b.isbn && found.isbn) b.isbn = found.isbn;
+      if (!found.cover && b.isbn) found.cover = await probeCover(b.isbn);
+      for (const k of ['subtitle', 'authors', 'publisher', 'year', 'pages', 'cover', 'lang']) if (!b[k] && found[k]) b[k] = found[k];
+      if (!b.plot) b.plot = found.description || '';
+      b.plotTried = true;
+      if (!(b.genres || []).length) b.genres = suggestGenres(found.subjects, found.authors, found.description).genres.filter((g) => state.genres.includes(g));
+      b.updatedAt = Date.now();
+    }
+    item.state = found ? 'ok' : failed ? 'failed' : 'notfound';
+    saveState();
+    return;
+  }
   try { const r = await lookupIsbn(item.isbn); found = r.data; failed = Boolean(r.failed || (r.googleDown && !r.data)); } catch (e) { failed = true; }
   let b = item.id ? state.books.find((x) => x.id === item.id) : null;
   if (!b) {
@@ -1827,6 +1931,201 @@ function renderBatch() {
   $('batch-list').innerHTML = [...rows].sort((a, b) => order(a) - order(b)).map(([it, b]) => (b
     ? bookRowHtml(it.state === 'ok' ? b : { ...b, title: b.title || (it.state === 'code' ? 'Codice da edicola o interno: scrivi il titolo' : it.state === 'failed' ? 'Non cercato: mancava la connessione' : 'Non trovato nei cataloghi'), authors: b.authors || (it.code ? 'Codice ' + it.code : 'ISBN ' + it.isbn) }, `data-id="${esc(b.id)}"`)
     : `<div class="book"><div class="cover">…</div><span class="book-info"><span class="book-title">Sto cercando…</span><span class="book-author">ISBN ${esc(it.isbn)}</span></span></div>`)).join('');
+}
+
+/* ================= IMPORTA DA ALTRE APP =================
+   Goodreads, StoryGraph, Libib, Handy Library, Bookshelf, un foglio Excel o un semplice elenco:
+   si riconoscono da sole le colonne (anche in italiano), si saltano i doppioni e poi
+   copertine e trame si completano dai cataloghi, come nella scansione a raffica. */
+const IMPORT_COLS = [
+  ['isbn', /^(isbn ?13|isbn13|ean|ean ?13|isbn|isbn ?10|isbn\/uid|codice|barcode|upc)$/],
+  ['title', /^(title|titolo|book title|name|nome)$/],
+  ['authors', /^(authors?|autor[ei]|scrittore|creators?|author l-f)$/],
+  ['publisher', /^(publisher|editore|casa editrice|publishers)$/],
+  ['year', /^(year published|original publication year|anno|anno di pubblicazione|publish date|date published|published|publication year|year)$/],
+  ['pages', /^(number of pages|pages|pagine|page count|num pages|numero di pagine)$/],
+  ['rating', /^(my rating|rating|voto|star rating|stelle|valutazione)$/],
+  ['readAt', /^(date read|last date read|read date|data lettura|letto nel|finito il|date finished|dates read)$/],
+  ['status', /^(exclusive shelf|read status|status|lettura|stato|shelf)$/],
+  ['notes', /^(my review|review|recensione|notes|note|commento|private notes)$/],
+  ['owners', /^(di chi è|proprietario|owner)$/],
+  ['list', /^(lista|wishlist)$/],
+  ['genres', /^(genre|genres|genere|generi|categoria|categories)$/],
+  ['series', /^(serie|series)$/],
+  ['seriesNum', /^(numero|series number|volume)$/],
+];
+let importRows = [], importOpts = { owners: [], toread: 'library', media: 'paper', complete: true };
+
+function splitCsv(text) {
+  const first = text.split(/\r?\n/).find((l) => l.trim()) || '';
+  const delim = [',', ';', '\t'].map((d) => [d, first.split(d).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"' && cell === '') q = true;
+    else if (c === delim) { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((x) => String(x).trim()));
+}
+
+/* Da una tabella (prima riga = intestazioni) ai libri. Se le intestazioni non si riconoscono, ritorna null. */
+function tableToRecords(rows) {
+  if (rows.length < 2) return null;
+  const head = rows[0].map((h) => String(h || '').trim().toLowerCase().replace(/\s+/g, ' '));
+  const map = {};
+  head.forEach((h, i) => { const hit = IMPORT_COLS.find(([k, re]) => re.test(h) && !(k in map)); if (hit) map[hit[0]] = i; });
+  // «Author l-f» (Cognome, Nome) solo se manca «Author».
+  if (!('title' in map) && !('isbn' in map)) return null;
+  return rows.slice(1).map((r) => {
+    const o = {};
+    for (const [k, i] of Object.entries(map)) o[k] = String(r[i] ?? '').trim();
+    return o;
+  });
+}
+
+function cleanRecord(o) {
+  const v = (x) => String(x || '').replace(/^="?|"$/g, '').trim();
+  const r = { title: v(o.title).replace(/\s*\(([^()]*),?\s*#\d+(\.\d+)?\)\s*$/, ''), authors: v(o.authors), publisher: v(o.publisher) };
+  // Goodreads mette la serie tra parentesi nel titolo: «Shogun (Asian Saga, #1)».
+  const sm = v(o.title).match(/\(([^()]*?),?\s*#(\d+)(?:\.\d+)?\)\s*$/);
+  r.series = v(o.series) || (sm ? sm[1].trim() : '');
+  r.seriesNum = v(o.seriesNum) || (sm ? sm[2] : '');
+  r.isbn = toIsbn13(v(o.isbn)) || '';
+  if (!r.isbn && /^\d{6,14}$/.test(v(o.isbn))) r.barcode = v(o.isbn);
+  const y = v(o.year).match(/(1[5-9]|20)\d{2}/); r.year = y ? y[0] : '';
+  r.pages = String(parseInt(v(o.pages), 10) || '').replace(/^0$/, '');
+  const rt = Math.round(parseFloat(v(o.rating).replace(',', '.')) || 0); r.rating = rt >= 1 && rt <= 5 ? rt : 0;
+  const st = v(o.status).toLowerCase();
+  r.status = /^(read|letto|letti|finished)$/.test(st) ? 'read' : /currently|in corso|reading|leggendo/.test(st) ? 'reading' : /to-read|to read|da leggere|want/.test(st) ? 'toread' : '';
+  // Date: 2024/03/12, 2024-03-12, 12/03/2024 → 12/03/2024; un anno resta un anno.
+  const d = v(o.readAt).split(/[,;]| - /)[0].trim();
+  let m;
+  if ((m = d.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/))) r.readAt = m[3].padStart(2, '0') + '/' + m[2].padStart(2, '0') + '/' + m[1];
+  else if ((m = d.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/))) r.readAt = m[1].padStart(2, '0') + '/' + m[2].padStart(2, '0') + '/' + m[3];
+  else r.readAt = /^(19|20)\d{2}$/.test(d) ? d : '';
+  if (r.readAt && !r.status) r.status = 'read';
+  if (r.rating && !r.status) r.status = 'read';
+  r.notes = v(o.notes).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+  r.owners = v(o.owners).split(/[,;]/).map((x) => x.trim()).filter((x) => state.owners.includes(x));
+  r.list = v(o.list);
+  r.genres = v(o.genres).split(/[,;|]/).map((x) => x.trim().toLowerCase()).map((g) => state.genres.find((x) => x.toLowerCase() === g)).filter(Boolean);
+  return r;
+}
+
+/* Testo incollato: una tabella con intestazioni, oppure una riga per libro (ISBN, oppure «Titolo - Autore»). */
+function parsePasted(text) {
+  const table = tableToRecords(splitCsv(text));
+  if (table && table.length) return table.map(cleanRecord);
+  return text.split(/\r?\n/).map((l) => l.trim().replace(/^[-•*\d.)\s]+(?=\D)/, '')).filter(Boolean).map((l) => {
+    const isbn = toIsbn13(l);
+    if (isbn) return cleanRecord({ isbn });
+    const codes = l.match(/\b(97[89][\d-]{10,14}|\d{9}[\dXx])\b/);
+    const parts = l.replace(codes ? codes[0] : '', '').split(/\s+[-–—]\s+|\t|;/).map((x) => x.trim()).filter(Boolean);
+    return cleanRecord({ isbn: codes ? codes[0] : '', title: parts[0] || '', authors: parts.slice(1).join(', ') });
+  }).filter((r) => r.title || r.isbn);
+}
+
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'vendor/xlsx.full.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+}
+
+async function importFile(file) {
+  try {
+    let recs;
+    if (/\.(xlsx|xlsm|xls|ods|numbers)$/i.test(file.name)) {
+      toast('Leggo il foglio…');
+      await loadXlsx();
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+      recs = (tableToRecords(rows) || []).map(cleanRecord);
+    } else if (/\.json$/i.test(file.name)) {
+      const j = JSON.parse(await file.text());
+      const arr = Array.isArray(j) ? j : j.books || [];
+      if (!Array.isArray(j) && j.books && j.genres) return toast('Questo è un backup della Libreria: usa «Ripristina da un backup».');
+      recs = arr.map((o) => cleanRecord({ ...o, authors: o.authors || o.author, isbn: o.isbn13 || o.isbn }));
+    } else {
+      recs = parsePasted(await file.text());
+    }
+    openImport(recs);
+  } catch (e) {
+    console.warn('[Libreria] import', e);
+    toast('Non riesco a leggere questo file. Prova a salvarlo come CSV.');
+  }
+}
+
+function importKey(r) { return r.isbn || (r.barcode ? 'c' + r.barcode : 't' + norm(r.title) + '|' + norm(authorsOf(r)[0] || '')); }
+function importDup(r) {
+  return state.books.find((b) => (r.isbn && b.isbn === r.isbn) || (r.barcode && b.barcode === r.barcode)
+    || (!r.isbn && r.title && norm(b.title) === norm(r.title) && (!r.authors || norm(authorsOf(b)[0] || '') === norm(authorsOf(r)[0] || ''))));
+}
+
+function openImport(recs) {
+  const seen = new Set();
+  importRows = recs.filter((r) => r.title || r.isbn).map((r) => {
+    const k = importKey(r); const twice = seen.has(k); seen.add(k);
+    return { r, dup: twice || Boolean(importDup(r)) };
+  });
+  if (!importRows.length) return toast('Non ho trovato libri: servono almeno il titolo o l\'ISBN, uno per riga.');
+  const me = pref('libreria.me', '');
+  importOpts = { owners: state.owners.includes(me) ? [me] : [], toread: 'library', media: 'paper', complete: true, list: state.wishlists[0] || '' };
+  renderImport();
+  show('import');
+}
+
+function renderImport() {
+  const fresh = importRows.filter((x) => !x.dup);
+  const dups = importRows.length - fresh.length;
+  const toread = fresh.filter((x) => x.r.status === 'toread').length;
+  const noIsbn = fresh.filter((x) => !x.r.isbn).length;
+  $('import-info').textContent = (fresh.length === 1 ? '1 libro nuovo' : fresh.length + ' libri nuovi')
+    + (dups ? ' · ' + dups + ' già presenti, li salto' : '')
+    + (noIsbn ? ' · ' + noIsbn + ' senza ISBN: li cerco per titolo' : '');
+  $('import-owners').innerHTML = state.owners.map((o) => `<button type="button" class="chip${importOpts.owners.includes(o) ? ' on' : ''}" data-owner="${esc(o)}">${esc(o)}</button>`).join('');
+  $('import-media').innerHTML = Object.keys(MEDIA).map((k) => `<button type="button" data-media="${k}" class="${importOpts.media === k ? 'on' : ''}">${MEDIA[k]}</button>`).join('');
+  $('import-toread-box').hidden = !toread;
+  $('import-toread-n').textContent = toread === 1 ? '1 libro è segnato «da leggere»' : toread + ' libri sono segnati «da leggere»';
+  $('import-toread').innerHTML = [['library', 'In libreria'], ['wish', 'Nei desideri']].map(([k, l]) => `<button type="button" data-toread="${k}" class="${importOpts.toread === k ? 'on' : ''}">${l}</button>`).join('');
+  $('import-list').hidden = importOpts.toread !== 'wish' || !state.wishlists.length;
+  $('import-list').innerHTML = state.wishlists.map((l) => `<option${l === importOpts.list ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  $('import-complete').checked = importOpts.complete;
+  $('import-go').disabled = !fresh.length;
+  $('import-go').textContent = fresh.length === 1 ? 'Importa 1 libro' : 'Importa ' + fresh.length + ' libri';
+  $('import-preview').innerHTML = importRows.slice(0, 60).map(({ r, dup }) => `<div class="import-row${dup ? ' dup' : ''}"><strong>${esc(r.title || 'ISBN ' + r.isbn)}</strong><span>${esc([r.authors, r.status ? STATUS[r.status] : '', r.rating ? '★'.repeat(r.rating) : '', dup ? 'già presente' : ''].filter(Boolean).join(' · '))}</span></div>`).join('')
+    + (importRows.length > 60 ? `<p class="hint">…e altri ${importRows.length - 60}.</p>` : '');
+}
+
+function runImport() {
+  const fresh = importRows.filter((x) => !x.dup);
+  if (!state.wishlists.length && importOpts.toread === 'wish') state.wishlists.push('Da comprare');
+  const list = importOpts.list || state.wishlists[0] || '';
+  batch = { seen: new Set(), items: [], running: false, audio: batch.audio };
+  for (const { r } of fresh) {
+    const wish = r.status === 'toread' && importOpts.toread === 'wish';
+    const b = {
+      id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: r.isbn, title: r.title, subtitle: '', authors: r.authors, publisher: cleanPublisher(r.publisher || ''),
+      year: r.year, pages: r.pages, genres: r.genres, owners: r.owners.length ? r.owners : [...importOpts.owners],
+      list: wish ? (state.wishlists.includes(r.list) ? r.list : list) : '', status: wish ? '' : r.status, readAt: wish ? '' : r.readAt, rating: wish ? 0 : r.rating, notes: r.notes,
+      media: importOpts.media === 'paper' ? ['paper'] : [importOpts.media], series: r.series, seriesNum: r.seriesNum,
+    };
+    if (r.barcode) b.barcode = r.barcode;
+    if (wish) b.media = importOpts.media === 'paper' ? [] : [importOpts.media];
+    state.books.push(b);
+    const lookup = importOpts.complete && navigator.onLine && (r.isbn || r.title);
+    batch.items.push({ isbn: r.isbn, q: r.isbn ? '' : [r.title, r.authors].filter(Boolean).join(' '), state: lookup ? 'wait' : 'ok', id: b.id });
+  }
+  saveState();
+  hide('import');
+  hide('settings');
+  renderList();
+  renderBatch();
+  show('batch');
+  runBatch();
+  toast(fresh.length === 1 ? '1 libro importato' : fresh.length + ' libri importati');
 }
 
 function openBatch() {
@@ -2226,7 +2525,7 @@ function hide(id) { $(id).hidden = true; scheduleBackSync(); }
    Il gesto o il tasto indietro chiude prima ciò che è aperto sopra l'elenco (anteprima, scheda,
    modulo, scanner…), poi l'elenco filtrato da un'etichetta, e solo alla fine esce dall'app.
    Si ottiene tenendo nella cronologia del browser una voce "di guardia" finché qualcosa è aperto. */
-const LAYERS = ['pick', 'review', 'bulk', 'book', 'view', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
+const LAYERS = ['pick', 'review', 'bulk', 'book', 'view', 'import', 'year', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
 let backGuard = false;
 let backPending = false;
 let backQueued = false;
@@ -2304,6 +2603,7 @@ function init() {
       show('filter-sheet');
       return;
     }
+    if (chip.dataset.share !== undefined) { shareList(filterList); return; }
     if (viewMode === 'wish') filterList = chip.dataset.genre; else filterGenre = chip.dataset.genre;
     renderList();
   });
@@ -2478,6 +2778,8 @@ function init() {
       // Un tocco imposta lo stato; un secondo tocco sullo stesso lo toglie.
       const wasRead = sb.status === 'read';
       setStatus(sb, sb.status === st.dataset.status ? '' : st.dataset.status);
+      // Toccando «Letto» nella scheda, di solito lo si è appena finito: si propone la data di oggi (modificabile).
+      if (sb.status === 'read' && !wasRead && !sb.readAt) sb.readAt = todayIt();
       sb.updatedAt = Date.now();
       saveState();
       renderList();
@@ -2521,6 +2823,7 @@ function init() {
       $('f-price').focus();
       return;
     }
+    if (btn.dataset.act === 'unclaim') { unclaimBook(b.id); return; }
     if (btn.dataset.act === 'returned') { b.loanTo = ''; b.loanDate = ''; }
     if (btn.dataset.act === 'bought') { const had = mediaOf(b); b.list = ''; b.media = ['paper', ...had]; if (!b.boughtAt) b.boughtAt = today(); }
     b.updatedAt = Date.now();
@@ -2960,9 +3263,41 @@ function init() {
 
   // Impostazioni
   $('btn-settings').addEventListener('click', () => { renderSettings(); show('settings'); });
+  $('btn-year').addEventListener('click', () => { yearWho = null; yearSel = new Date().getFullYear(); renderYear(); show('year'); $('year-body').scrollTop = 0; });
+  $('year-close').addEventListener('click', () => hide('year'));
+  $('year-body').addEventListener('click', (e) => {
+    const w = e.target.closest('[data-who]'); if (w) { yearWho = w.dataset.who; renderYear(); return; }
+    const y = e.target.closest('[data-year]'); if (y) { yearSel = Number(y.dataset.year); renderYear(); return; }
+    const c = e.target.closest('[data-id]'); if (c) { const b = state.books.find((x) => x.id === c.dataset.id); if (b) openView(b); return; }
+    if (e.target.closest('[data-undated]')) {
+      hide('year'); viewMode = 'library'; backTo = null;
+      filterGenre = 'status:read' + (yearWho ? '|owner:' + yearWho : '');
+      if (viewKind === 'shelf') viewKind = 'list';
+      renderList(); window.scrollTo(0, 0);
+      toast('Apri un libro e scrivi l\'anno in «Letto nel».');
+      return;
+    }
+    if (e.target.closest('#goal-save')) {
+      const v = Math.max(0, Math.min(999, Math.round(Number($('goal-n').value) || 0)));
+      state.goals = { ...(state.goals || {}), [goalKey(yearWho, yearSel)]: { n: v, at: Date.now() } };
+      saveState(); renderYear();
+      toast(v ? 'Obiettivo ' + yearSel + ': ' + v + ' libri.' : 'Obiettivo tolto.');
+    }
+  });
   $('settings-close').addEventListener('click', () => hide('settings'));
   $('backup-download').addEventListener('click', downloadBackup);
   $('export-csv').addEventListener('click', exportCsv);
+  $('import-file').addEventListener('change', (e) => { if (e.target.files[0]) importFile(e.target.files[0]); e.target.value = ''; });
+  $('import-paste-go').addEventListener('click', () => { const t = $('import-paste').value.trim(); if (!t) return toast('Incolla prima l\'elenco.'); openImport(parsePasted(t)); });
+  $('import-close').addEventListener('click', () => hide('import'));
+  $('import-go').addEventListener('click', () => { $('import-paste').value = ''; runImport(); });
+  $('import-complete').addEventListener('change', (e) => { importOpts.complete = e.target.checked; });
+  $('import-list').addEventListener('change', (e) => { importOpts.list = e.target.value; });
+  $('import').addEventListener('click', (e) => {
+    const o = e.target.closest('[data-owner]'); if (o) { const v = o.dataset.owner; importOpts.owners = importOpts.owners.includes(v) ? importOpts.owners.filter((x) => x !== v) : [...importOpts.owners, v]; renderImport(); return; }
+    const m = e.target.closest('[data-media]'); if (m) { importOpts.media = m.dataset.media; renderImport(); return; }
+    const t = e.target.closest('[data-toread]'); if (t) { importOpts.toread = t.dataset.toread; renderImport(); }
+  });
   $('backup-file').addEventListener('change', (e) => { if (e.target.files[0]) restoreBackup(e.target.files[0]); e.target.value = ''; });
   $('gkey-save').addEventListener('click', async () => {
     const key = $('gkey').value.trim();

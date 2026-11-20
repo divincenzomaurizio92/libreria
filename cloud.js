@@ -30,6 +30,53 @@ function setCloudStatus(kind, text) {
 
 function cloudReady() { return Boolean(sb && cloudUser && cloud.lib); }
 
+/* Liste desideri condivise: chi ha il link può segnare «Lo prendo io»; qui si leggono i nomi. */
+async function pullClaims() {
+  const { data, error } = await sb.from('libreria_claims').select('id,book_id,name').eq('library_id', cloud.lib);
+  if (error) { console.warn('[Libreria] prenotazioni', error); return false; }
+  const next = {};
+  for (const c of data || []) next[c.book_id] = { name: c.name, id: c.id };
+  const changed = JSON.stringify(next) !== JSON.stringify(claims);
+  claims = next;
+  return changed;
+}
+
+async function unclaimBook(bookId) {
+  const c = claims[bookId];
+  if (!c || !cloudReady()) return;
+  const { error } = await sb.from('libreria_claims').delete().eq('id', c.id);
+  if (error) return toast('Non riesco a liberarlo: riprova tra poco.');
+  delete claims[bookId];
+  renderList();
+  const b = state.books.find((x) => x.id === bookId);
+  if (b && !$('view').hidden) renderView(b);
+  toast('Di nuovo libero: chi apre il link può prenderlo.');
+}
+
+/* Crea (o riusa) il link della lista e lo passa a WhatsApp, Telegram, email… */
+async function shareList(list) {
+  if (!list) return;
+  if (!cloudReady()) return toast('Per condividere una lista serve la libreria online: Impostazioni → La vostra libreria online.');
+  if (!navigator.onLine) return toast('Serve la connessione per creare il link.');
+  let token = '';
+  const { data, error } = await sb.from('libreria_shares').select('token').eq('library_id', cloud.lib).eq('list', list).eq('revoked', false).limit(1);
+  if (error) return toast('Non riesco a creare il link: riprova tra poco.');
+  if (data && data.length) token = data[0].token;
+  else {
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    token = Array.from(bytes, (x) => x.toString(16).padStart(2, '0')).join('');
+    const { error: e2 } = await sb.from('libreria_shares').insert({ token, library_id: cloud.lib, list });
+    if (e2) return toast('Non riesco a creare il link: riprova tra poco.');
+  }
+  const url = new URL('share.html?t=' + token, location.href).href;
+  const text = 'La mia lista desideri «' + list + '»: se vuoi regalarmi un libro, tocca «Lo prendo io» così non arrivano doppioni.';
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Lista desideri: ' + list, text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast('Link copiato: incollalo dove vuoi.'); }
+  catch (e) { prompt('Copia il link della lista:', url); }
+}
+
 /* Ogni salvataggio sul telefono fa partire, poco dopo, l'invio al database. */
 function scheduleSync(delay = 2500) {
   if (!cloudReady()) return;
@@ -47,6 +94,7 @@ async function syncNow() {
     let changedLocally = await pullBooks();
     if (await syncSettings()) changedLocally = true;
     await pushBooks();
+    if (await pullClaims()) changedLocally = true;
     cloud.lastSync = Date.now();
     saveSyncState();
     setCloudStatus('ok', '');
@@ -169,10 +217,23 @@ async function syncSettings() {
     if (!$('settings').hidden) renderSettings();
   }
   cloud.keySeen = key;
+  // Obiettivi di lettura (persona e anno): per ognuno vince l'ultimo cambiato, su qualsiasi telefono.
+  const rGoals = remote.goals && typeof remote.goals === 'object' ? remote.goals : {};
+  const lGoals = state.goals || {};
+  const goals = { ...rGoals };
+  for (const [k, g] of Object.entries(lGoals)) if (!goals[k] || (g.at || 0) > (goals[k].at || 0)) goals[k] = g;
+  const sortedSig = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k].n, o[k].at]));
+  const goalsSig = sortedSig(goals);
+  const goalsChanged = goalsSig !== sortedSig(lGoals);
+  if (goalsChanged) {
+    state.goals = goals;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (!$('year').hidden) renderYear();
+  }
   const remoteSig = JSON.stringify(SETTINGS_KEYS.reduce((o, k) => ((o[k] = remote[k] || []), o), {}));
-  if (!hasRemote || mergedSig !== remoteSig || key !== remoteKey) {
+  if (!hasRemote || mergedSig !== remoteSig || key !== remoteKey || goalsSig !== sortedSig(rGoals)) {
     const at = Date.now();
-    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: { ...merged, googleKey: key }, settings_at: at }).eq('id', cloud.lib);
+    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: { ...merged, googleKey: key, goals }, settings_at: at }).eq('id', cloud.lib);
     if (e2) throw e2;
     cloud.settingsAt = at;
   } else {
@@ -180,7 +241,7 @@ async function syncSettings() {
   }
   cloud.settingsBase = JSON.parse(mergedSig);
   cloud.settingsSig = settingsSig();
-  return mergedSig !== JSON.stringify(local);
+  return mergedSig !== JSON.stringify(local) || goalsChanged;
 }
 
 /* ---------- Accesso ---------- */

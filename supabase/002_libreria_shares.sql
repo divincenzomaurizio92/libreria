@@ -1,0 +1,13 @@
+-- Libreria: liste desideri condivisibili (applicata su DR HUB il 20/11/2026).
+-- Solo oggetti nuovi con prefisso libreria_, nessuna modifica alle tabelle dell'Hub.
+--
+-- libreria_shares(token text pk, library_id uuid, list text, created_at, revoked bool)
+--   RLS: i membri della libreria leggono, creano e revocano i link.
+-- libreria_claims(id uuid pk, library_id uuid, book_id text, name text 1–60, created_at, unique(library_id, book_id))
+--   RLS: i membri leggono ed eliminano le prenotazioni; nessun accesso diretto per anon.
+--
+-- Funzioni security definer, eseguibili anche senza accesso (anon), che lavorano solo con un token valido:
+--   libreria_share_get(p_token)                    → { list, books: [{ id, title, subtitle, authors, publisher, isbn, price, cover, taken }] }
+--                                                    (solo i libri di quella lista; mai i nomi di chi ha preso)
+--   libreria_share_claim(p_token, p_book, p_name)  → { ok, claim } oppure { ok: false, error: 'link' | 'book' | 'taken' }
+--   libreria_share_unclaim(p_token, p_claim)       → true/false (annulla con il codice salvato sul telefono di chi ha preso)

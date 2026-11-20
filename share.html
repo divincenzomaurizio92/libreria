@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#271C15">
+<meta name="robots" content="noindex">
+<title>Lista desideri</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #1F1712; --surface: #2B211A; --line: #4A3A2E; --ink: #F1E4CF; --muted: #B8A68E; --accent: #E2A44B; --accent-ink: #1F1712; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(120% 60% at 50% -10%, rgba(226, 164, 75, .18), transparent 70%) var(--bg); color: var(--ink); font: 400 16px/1.45 Figtree, system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: calc(28px + env(safe-area-inset-top)) 18px 60px; }
+  h1 { margin: 0; font: 600 32px/1.1 Fraunces, Georgia, serif; }
+  .sub { margin: 6px 0 22px; color: var(--muted); }
+  .book { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); align-items: center; }
+  .cover { width: 64px; height: 96px; flex: 0 0 64px; border-radius: 2px 5px 5px 2px; background: #3F4A6B center / cover no-repeat; box-shadow: 0 1px 2px rgba(0,0,0,.5), 3px 4px 10px rgba(0,0,0,.35); display: grid; place-items: center; font: italic 600 12px/1.1 Fraunces, serif; text-align: center; padding: 6px; overflow: hidden; }
+  .info { flex: 1; min-width: 0; }
+  .t { font: 600 17px/1.25 Fraunces, Georgia, serif; }
+  .a { color: var(--muted); font-size: 14px; }
+  .p { color: var(--accent); font-weight: 600; font-size: 14px; }
+  button { min-height: 42px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: 600 14px/1 Figtree, sans-serif; cursor: pointer; white-space: nowrap; }
+  button.ghost { background: none; color: var(--ink); border-color: var(--line); }
+  .taken { color: var(--muted); font-size: 13px; text-align: right; }
+  .taken.mine { color: var(--accent); }
+  .empty { margin-top: 30px; color: var(--muted); text-align: center; }
+  .foot { margin-top: 30px; color: var(--muted); font-size: 13px; text-align: center; }
+  dialog { border: 1px solid var(--accent); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 20px; width: min(360px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  dialog input { width: 100%; min-height: 46px; margin: 10px 0 14px; padding: 0 12px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Lista desideri</h1>
+  <p class="sub" id="sub">Carico la lista…</p>
+  <div id="books"></div>
+  <p class="foot">Toccando «Lo prendo io» il libro risulta preso per tutti, così nessuno lo regala due volte.<br>Chi ha fatto la lista vede il tuo nome; gli altri vedono solo «già preso».</p>
+</main>
+<dialog id="ask">
+  <form method="dialog" id="ask-form">
+    <strong id="ask-title">Lo prendi tu?</strong>
+    <input id="ask-name" maxlength="60" placeholder="Il tuo nome" autocomplete="name" required>
+    <div class="row"><button type="button" class="ghost" id="ask-cancel">Annulla</button><button type="submit">Lo prendo io</button></div>
+  </form>
+</dialog>
+<script>
+/* Pagina pubblica di una lista desideri della Libreria: si apre solo con il link (il «token»). */
+const URL_DB = 'https://yhtdnfxlszkeydlnxwme.supabase.co/rest/v1/rpc/';
+const KEY = 'sb_publishable_y_GGmVv2RD7z83XXgGStDw_0HfaoloX';
+const token = new URLSearchParams(location.search).get('t') || '';
+const mine = JSON.parse(localStorage.getItem('libreria.share.' + token) || '{}'); // libri presi da questo telefono: id → codice
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let data = null, pending = null;
+
+async function rpc(name, body) {
+  const r = await fetch(URL_DB + name, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error('rete');
+  return r.json();
+}
+async function load() {
+  try { data = await rpc('libreria_share_get', { p_token: token }); }
+  catch (e) { $('sub').textContent = 'Non riesco a caricare la lista: controlla la connessione e riprova.'; return; }
+  if (!data) { $('sub').textContent = 'Questo link non è più valido. Chiedi il link nuovo a chi te l\'ha mandato.'; return; }
+  render();
+}
+function render() {
+  document.title = 'Lista desideri: ' + data.list;
+  $('title').textContent = 'Lista desideri: ' + data.list;
+  const free = data.books.filter((b) => !b.taken).length;
+  $('sub').textContent = data.books.length ? (free === 1 ? '1 libro ancora da regalare' : free + ' libri ancora da regalare') + ' su ' + data.books.length : '';
+  $('books').innerHTML = data.books.length ? data.books.map((b) => {
+    const price = Number(String(b.price || '').replace(',', '.'));
+    const cover = b.cover ? `style="background-image:url('${esc(b.cover.replace(/^http:/, 'https:'))}')"` : '';
+    const action = mine[b.id] && b.taken ? `<div class="taken mine">Lo prendi tu<br><button class="ghost" data-undo="${esc(b.id)}">Annulla</button></div>`
+      : b.taken ? '<div class="taken">Già preso</div>'
+      : `<button data-claim="${esc(b.id)}">Lo prendo io</button>`;
+    return `<div class="book"><div class="cover" ${cover}>${b.cover ? '' : esc(b.title)}</div>
+      <div class="info"><div class="t">${esc(b.title)}</div><div class="a">${esc(b.authors || '')}${b.publisher ? ' · ' + esc(b.publisher) : ''}</div>${price > 0 ? `<div class="p">${price.toFixed(2).replace('.', ',')} €</div>` : ''}</div>${action}</div>`;
+  }).join('') : '<p class="empty">La lista è vuota, per ora.</p>';
+}
+$('books').addEventListener('click', async (e) => {
+  const c = e.target.closest('[data-claim]');
+  if (c) { pending = c.dataset.claim; $('ask-title').textContent = 'Prendi «' + data.books.find((b) => b.id === pending).title + '»?'; $('ask-name').value = localStorage.getItem('libreria.share.name') || ''; $('ask').showModal(); return; }
+  const u = e.target.closest('[data-undo]');
+  if (u) {
+    const id = u.dataset.undo;
+    try { await rpc('libreria_share_unclaim', { p_token: token, p_claim: mine[id] }); } catch (err) { return alert('Non riesco ad annullare: riprova.'); }
+    delete mine[id]; localStorage.setItem('libreria.share.' + token, JSON.stringify(mine)); load();
+  }
+});
+$('ask-cancel').addEventListener('click', () => $('ask').close());
+$('ask-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('ask-name').value.trim();
+  if (!name) return;
+  localStorage.setItem('libreria.share.name', name);
+  $('ask').close();
+  let r;
+  try { r = await rpc('libreria_share_claim', { p_token: token, p_book: pending, p_name: name }); } catch (err) { return alert('Non riesco a segnarlo: controlla la connessione.'); }
+  if (r && r.ok) { mine[pending] = r.claim; localStorage.setItem('libreria.share.' + token, JSON.stringify(mine)); }
+  else if (r && r.error === 'taken') alert('Qualcuno l\'ha appena preso prima di te.');
+  load();
+});
+load();
+</script>
+</body>
+</html>

@@ -61,7 +61,7 @@ boughtAt, price, loanTo, loanDate, addedAt, updatedAt`.
 
 ---
 
-## 3. Cosa c'è (Versione 50)
+## 3. Cosa c'è (Versione 57)
 
 **Inserimento:** scansione singola, a raffica (con riepilogo e "vale per tutti": persona, mobile, lettura),
 "Ce l'ho già?" in negozio, penna con risultati mentre scrivi, codici non ISBN (edicola 977, codici interni dei
@@ -81,6 +81,17 @@ versione, genere. Scaffale con dorsi e "Suggerisci come disporli" con i metri di
 **Altro:** aggiornamento automatico all'apertura, icona sulla schermata Home, backup JSON ed Excel,
 rinomina di persone/mobili/liste/generi.
 
+**Novità v56–57:** selezione multipla e modifica in blocco; pagina autore e pagina serie (con i volumi mancanti);
+"Da sistemare" nelle impostazioni (libri senza persona, genere, voto, mobile, serie, doppioni); citazioni nella
+scheda; "Cosa leggo stasera?"; mensole con "Vedi tutti". **Liste desideri condivisibili**: nei Desideri, scelta
+una lista, "Condividi" crea un link (`share.html?t=…`) che parenti e amici aprono senza account e dove toccano
+"Lo prendo io"; voi vedete "🎁 Lo prende Nome" (e potete renderlo libero). Tabelle `libreria_shares` e
+`libreria_claims` su DR HUB (vedi `supabase/002_libreria_shares.sql`). **Anno in libri** (omino in alto): per
+persona e anno, letti, obiettivo sincronizzato tra i telefoni, pagine, voto medio, genere e autore preferiti,
+mese per mese, copertine. **Importa da altre app** (Impostazioni): CSV di Goodreads/StoryGraph/Libib/Handy
+Library, Excel, oppure elenco incollato (ISBN o "Titolo - Autore"); doppioni saltati, poi completamento dai
+cataloghi come la raffica (anche per titolo, se manca l'ISBN).
+
 ---
 
 ## 4. Cosa manca, in ordine
@@ -94,7 +105,6 @@ rinomina di persone/mobili/liste/generi.
    - Poi, con una funzione su Supabase: copertine fisse nel proprio archivio (con il colore vero), genere e tema
      proposti dalla trama (anche in blocco), prezzi di copertina, riconoscimento dalla foto della copertina
      (risolve edicola e libri senza ISBN), "Da scoprire" settimanale (più venduti in Italia + simili ai vostri).
-3. **Profili con statistiche** (icona a omino in alto: letti per anno, generi, voti, metri di mensola).
 4. **Ritaglio delle foto di copertina** (riquadro guida, niente tavolo attorno).
 5. **Libreria nuova a parete:** misure dei vani, "oggetti" nel catalogo (set Pokémon, pianta, quadretto),
    disposizione vano per vano nello scaffale digitale e PDF stampabile con caselle da spuntare.

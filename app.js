@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 72; // va tenuto uguale al numero in version.json
+const APP_VERSION = 73; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1047,12 +1047,12 @@ function claudeAuthorHtml(name) {
 }
 
 /* Scelta della lista desideri: se ce n'è più di una, si chiede quale. */
-function chooseWishlist(title, done) {
+function chooseWishlist(title, done, question) {
   if (!state.wishlists.length) state.wishlists.push('Da comprare');
   if (state.wishlists.length === 1) return done(state.wishlists[0]);
   const wrap = document.createElement('div');
   wrap.className = 'pick-list';
-  wrap.innerHTML = `<div class="pick-list-card" role="dialog" aria-label="In quale lista?"><p>In quale lista metto «${esc(title)}»?</p>
+  wrap.innerHTML = `<div class="pick-list-card" role="dialog" aria-label="In quale lista?"><p>${question ? esc(question) : `In quale lista metto «${esc(title)}»?`}</p>
     ${state.wishlists.map((l, i) => `<button class="btn ghost wide" data-i="${i}">${esc(l)}</button>`).join('')}
     <button class="btn wide pick-list-no">Annulla</button></div>`;
   const close = () => wrap.remove();
@@ -1252,8 +1252,8 @@ function discoverHtml() {
   const d = loadDiscover();
   const chart = (title, src, items) => (items && items.length
     ? `<p class="disc-sub">${title}</p>${src ? `<p class="disc-src">${esc(src)}</p>` : ''}${suggShelves(items.slice(0, 10), null, (it, k) => it.rank || k + 1)}` : '');
-  const body = d ? chart('I più venduti in Italia', d.source, d.bestsellers)
-    + (d.similar && d.similar.length ? `<p class="disc-sub">Simili ai vostri preferiti</p>${suggShelves(d.similar.slice(0, 12), (it) => it.reason)}` : '') : '';
+  const body = d ? chart('Classifica dei più venduti', d.source, d.bestsellers)
+    + (d.similar && d.similar.length ? `<p class="disc-sub">Simili ai vostri preferiti</p>${suggShelves(d.similar.slice(0, 12), (it) => it.title)}` : '') : '';
   const canAsk = typeof cloudReady === 'function' && cloudReady();
   return `<section class="rail-sec discover">
     <div class="disc-head"><h3 class="rail-label">Da scoprire</h3>${d && canAsk ? `<button class="chip disc-refresh" data-disc-now ${discoverBusy ? 'disabled' : ''}>
@@ -1281,7 +1281,36 @@ function pickPool() {
   return state.books.filter((b) => isOwned(b) && b.status === 'toread' && matchesFilter(b) && (!pickLen
     || (pickLen === 'short' ? (Number(b.pages) || 300) < 250 : pickLen === 'long' ? (Number(b.pages) || 0) >= 400 : true)));
 }
+/* La trama aiuta a scegliere: corta, con «Leggi tutto». Se manca, si cerca nei cataloghi e si salva nel libro. */
+let pickPlotOpen = false;
+function renderPickPlot(b) {
+  const el = $('pick-plot');
+  if (!b) { el.innerHTML = ''; return; }
+  if (b.plot) {
+    el.innerHTML = b.plot.length > 280 && !pickPlotOpen
+      ? esc(b.plot.slice(0, 280).replace(/\s+\S*$/, '')) + '… <button class="link-btn" data-pick-more>Leggi tutto</button>'
+      : esc(b.plot);
+    return;
+  }
+  if (b.plotTried || !navigator.onLine) { el.innerHTML = '<span class="hint">Trama non disponibile.</span>'; return; }
+  el.innerHTML = '<span class="hint claude-wait">Cerco la trama…</span>';
+  b.plotTried = true;
+  (async () => {
+    try {
+      let f = b.isbn ? (await lookupIsbn(b.isbn)).data : null;
+      if (!f || !f.description) {
+        const t = norm(b.title);
+        const hit = (await searchByText([b.title, firstAuthor(b.authors)].join(' '))).find((x) => norm(x.title).startsWith(t) || t.startsWith(norm(x.title)));
+        if (hit && hit.description) f = hit;
+      }
+      if (f && f.description) { b.plot = f.description; b.updatedAt = Date.now(); }
+    } catch (e) { /* niente */ }
+    saveState();
+    if (pickId === b.id && !$('pick').hidden) renderPickPlot(b);
+  })();
+}
 function openPick(again) {
+  pickPlotOpen = false;
   const pool = pickPool().filter((b) => b.id !== pickId || pickPool().length === 1);
   const b = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
   pickId = b ? b.id : '';
@@ -1289,6 +1318,7 @@ function openPick(again) {
   $('pick-book').innerHTML = b
     ? `${coverHtml(b, true)}<div><h2>${esc(b.title)}</h2><p class="hint">${esc(b.authors || '')}${b.pages ? ' · ' + esc(b.pages) + ' pagine' : ''}</p></div>`
     : '<p class="hint">Nessun libro da leggere con questa scelta.</p>';
+  renderPickPlot(b);
   $('pick-start').disabled = !b;
   $('pick-open').disabled = !b;
   $('pick-card').style.setProperty('--book', b ? bookColor(b) : 'var(--surface)');
@@ -1436,14 +1466,20 @@ function renderList() {
 
   // Filtri: in libreria i generi usati, nei desideri le liste.
   const chip = (value, label, on) => `<button class="chip${on ? ' on' : ''}" data-genre="${esc(value)}">${esc(label)}</button>`;
+  $('wish-lists').hidden = !wish || !state.wishlists.length;
+  if (!wish) $('wish-lists').innerHTML = '';
   if (wish) {
     if (filterList && !state.wishlists.includes(filterList)) filterList = '';
+    // Le liste stanno in una riga tutta loro, a capo se serve: nomi sempre interi, mai coperti dai pulsanti.
+    // In alto, accanto ai pulsanti, «Condividi» (e «Mostra chi regala»); sotto, le liste in una riga tutta loro,
+    // a capo se serve: nomi sempre interi, mai coperti dai pulsanti.
     $('filters').innerHTML = state.wishlists.length
-      ? state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')
-        // Con una lista scelta si può mandarne il link a parenti e amici.
+      ? `<button class="chip share-chip" data-share><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/></svg>Condividi</button>`
         + (wished.some((b) => claims[b.id] && (!filterList || b.list === filterList))
-          ? `<button class="chip${claimsShown ? ' on' : ''}" data-claims aria-pressed="${claimsShown}">🎁 ${claimsShown ? 'Nascondi chi regala' : 'Mostra chi regala'}</button>` : '')
-        + (filterList ? `<button class="chip share-chip" data-share><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/></svg>Condividi</button>` : '')
+          ? `<button class="chip${claimsShown ? ' on' : ''}" data-claims aria-pressed="${claimsShown}">🎁 ${claimsShown ? 'Nascondi' : 'Chi regala'}</button>` : '')
+      : '';
+    $('wish-lists').innerHTML = state.wishlists.length
+      ? `<div class="wish-chips">${state.wishlists.map((l) => chip(l, l + ' (' + wished.filter((b) => b.list === l).length + ')', filterList === l)).join('')}</div>`
       : '';
   } else if (audio) {
     $('filters').innerHTML = '';
@@ -3020,7 +3056,7 @@ function init() {
   // Elenco
   $('search').addEventListener('input', renderList);
   $('sort').addEventListener('change', renderList);
-  $('filters').addEventListener('click', (e) => {
+  const filtersClick = (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
     if (chip.dataset.openFilters !== undefined) {
@@ -3029,12 +3065,14 @@ function init() {
       show('filter-sheet');
       return;
     }
-    if (chip.dataset.share !== undefined) { shareList(filterList); return; }
+    if (chip.dataset.share !== undefined) { if (filterList) shareList(filterList); else chooseWishlist('il link', shareList, 'Quale lista vuoi condividere?'); return; }
     if (chip.dataset.claims !== undefined) { claimsShown = !claimsShown; renderList(); return; }
     // Nei desideri si tocca di nuovo la lista accesa per tornare a vederle tutte.
     if (viewMode === 'wish') filterList = filterList === chip.dataset.genre ? '' : chip.dataset.genre; else filterGenre = chip.dataset.genre;
     renderList();
-  });
+  };
+  $('filters').addEventListener('click', filtersClick);
+  $('wish-lists').addEventListener('click', filtersClick);
   $('filter-close').addEventListener('click', () => hide('filter-sheet'));
   $('filter-clear').addEventListener('click', () => { filterGenre = ''; renderList(); hide('filter-sheet'); });
   $('filter-q').addEventListener('input', renderFilterSheet);
@@ -3386,6 +3424,7 @@ function init() {
   $('pick-close').addEventListener('click', () => hide('pick'));
   $('pick').addEventListener('click', (e) => { if (e.target === $('pick')) hide('pick'); });
   $('pick-lens').addEventListener('click', (e) => { const c = e.target.closest('[data-len]'); if (!c) return; pickLen = c.dataset.len; openPick(true); });
+  $('pick-plot').addEventListener('click', (e) => { if (e.target.closest('[data-pick-more]')) { pickPlotOpen = true; const b = state.books.find((x) => x.id === pickId); if (b) renderPickPlot(b); } });
   $('pick-open').addEventListener('click', () => { const b = state.books.find((x) => x.id === pickId); hide('pick'); if (b) openView(b); });
   $('pick-start').addEventListener('click', () => {
     const b = state.books.find((x) => x.id === pickId);

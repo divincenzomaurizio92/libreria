@@ -8,15 +8,15 @@
 <script>document.documentElement.dataset.theme = 'night';</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Libreria">
-<link rel="manifest" href="manifest.webmanifest?v=72">
-<link rel="icon" href="icons/icon.svg?v=72" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/icon-180.png?v=72">
+<link rel="manifest" href="manifest.webmanifest?v=73">
+<link rel="icon" href="icons/icon.svg?v=73" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png?v=73">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=72">
+<link rel="stylesheet" href="style.css?v=73">
 </head>
 <body>
 
@@ -56,6 +56,7 @@
     <button class="chip select-btn" id="btn-select" aria-label="Seleziona più libri per modificarli insieme"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.2l2.4 2.4 4.7-5"/></svg></button>
     <div class="view-toggle" id="view-cycle" role="group" aria-label="Vista"></div>
   </div>
+  <div class="wish-lists" id="wish-lists" hidden></div>
   <button class="chip arrange-btn" id="btn-arrange" hidden>Suggerisci come disporli</button>
   <div class="view-menu" id="view-menu" hidden></div>
   <div class="shelf-sort" id="shelf-sort" hidden>
@@ -552,6 +553,7 @@
     <h3 class="rail-label">Cosa leggo stasera?</h3>
     <div class="seg" id="pick-lens"></div>
     <div class="pick-book" id="pick-book"></div>
+    <p class="pick-plot" id="pick-plot"></p>
     <div class="row"><button class="btn ghost" id="pick-again">Un altro</button><button class="btn ghost" id="pick-open">Apri</button></div>
     <button class="btn primary wide" id="pick-start">Inizio a leggerlo</button>
     <button class="btn ghost wide" id="pick-close">Chiudi</button>
@@ -565,9 +567,9 @@
 <div class="toast" id="toast" hidden role="status"></div>
 <div class="update-bar" id="update-bar" hidden role="status"><span>C'è una versione nuova dell'app</span><button class="btn primary" id="update-go">Aggiorna</button></div>
 
-<script src="vendor/zxing.min.js?v=72"></script>
-<script src="app.js?v=72"></script>
-<script src="vendor/supabase.min.js?v=72"></script>
-<script src="cloud.js?v=72"></script>
+<script src="vendor/zxing.min.js?v=73"></script>
+<script src="app.js?v=73"></script>
+<script src="vendor/supabase.min.js?v=73"></script>
+<script src="cloud.js?v=73"></script>
 </body>
 </html>

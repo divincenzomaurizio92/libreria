@@ -916,3 +916,11 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .chart-shelves .own-badge { top: 6px; bottom: auto; left: 6px; }
 .discover { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
 .sugg-plot .link-btn { display: inline; padding: 0; font-size: inherit; }
+
+/* v73 — liste dei desideri su una riga loro, trama in «Cosa leggo stasera?» */
+.wish-lists { padding: 10px 0 2px; }
+.wish-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wish-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.wish-actions .chip { min-height: 34px; font-size: 13.5px; }
+.pick-plot { margin: 12px 0 4px; font-size: 14.5px; line-height: 1.5; max-height: 40vh; overflow-y: auto; }
+.pick-plot .link-btn { display: inline; padding: 0; font-size: inherit; }

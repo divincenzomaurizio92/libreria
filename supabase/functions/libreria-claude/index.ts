@@ -53,6 +53,32 @@ async function chiedi(prompt: string, ricerche = 5, pagine = 0): Promise<{ testo
   return { testo, costo };
 }
 
+// Classifica pubblica di Feltrinelli (i più venduti di oggi), letta direttamente dal sito: niente Claude, sempre 10 titoli in ordine.
+const dec = (s: string) => s.replace(/&amp;/g, "&").replace(/&#0?39;|&apos;|&rsquo;/g, "'").replace(/&quot;/g, '"').replace(/&egrave;/g, "è").replace(/&agrave;/g, "à").replace(/&ograve;/g, "ò")
+  .replace(/&ugrave;/g, "ù").replace(/&igrave;/g, "ì").replace(/&eacute;/g, "é").replace(/&nbsp;/g, " ").replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)));
+async function feltrinelli(): Promise<any[]> {
+  const r = await fetch("https://www.lafeltrinelli.it/classifica/libri/1day/sold?defaultPage=1", { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Mobile Safari/537.36", "Accept-Language": "it-IT,it" } });
+  if (!r.ok) throw new Error("Feltrinelli " + r.status);
+  const h = await r.text();
+  const at = h.indexOf("ranking-");
+  if (at < 0) throw new Error("classifica non trovata nella pagina");
+  const body = h.slice(Math.max(0, at - 4000));
+  const eans: string[] = [], pos: number[] = [];
+  for (const m of body.matchAll(/\/e\/(97[89]\d{10})/g)) { if (!eans.includes(m[1])) { eans.push(m[1]); pos.push(m.index!); } if (eans.length >= 10) break; }
+  return eans.map((ean, k) => {
+    const seg = body.slice(pos[k], pos[k + 1] || pos[k] + 15000);
+    const titolo = dec((seg.match(/alt="([^"]{2,200})"/) || [])[1] || "").trim();
+    const tok = dec(seg.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, "|")).split("|").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+    // Dopo il titolo: «di», poi gli autori (separati da «,») fino a «Recensioni».
+    const i = tok.findIndex((x) => x === titolo), au: string[] = [];
+    if (i >= 0 && tok[i + 1] === "di") for (let j = i + 2; j < tok.length && !/^Recensioni/i.test(tok[j]) && au.length < 4; j++) if (tok[j] !== ",") au.push(tok[j]);
+    const autore = au.join(", ");
+    const ed = tok.find((x) => /^[A-Za-zÀ-ÿ&'.\- ]{2,40},?\s*\(?(19|20)\d{2}\)?$/.test(x)) || "";
+    return { posizione: k + 1, titolo, autore, editore: ed.replace(/,?\s*\(?(19|20)\d{2}\)?$/, "").trim() || null, isbn: ean,
+      copertina: `https://www.lafeltrinelli.it/images/${ean}_0_0_190_0_75.jpg` };
+  }).filter((x) => x.titolo);
+}
+
 function jsonDa(t: string): any { const m = t.match(/\{[\s\S]*\}/); if (!m) return null; try { return JSON.parse(m[0]); } catch { return null; } }
 const s = (v: unknown, n = 160) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
@@ -87,11 +113,17 @@ async function scopri(b: any) {
   const temi = (Array.isArray(b.temi) ? b.temi : []).slice(0, 12).map((x: any) => s(x, 40)).join(", ");
   const avete = (Array.isArray(b.avete) ? b.avete : []).slice(0, 250).map((x: any) => s(x, 60)).join("; ");
   const oggi = new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+  // La classifica Feltrinelli si legge direttamente dal sito (esatta e gratis); Claude la cerca solo se il sito non risponde.
+  let felt: any[] = [];
+  try { felt = await feltrinelli(); } catch (e) { console.log(JSON.stringify({ feltrinelli: String(e).slice(0, 200) })); }
+  const conFelt = felt.length >= 5;
   const prompt = `Sei il bibliotecario di una famiglia italiana. Oggi è ${oggi}.\n`
-    + `1) Cerca «classifica libri più venduti lafeltrinelli» e apri con web_fetch la pagina della classifica sul sito lafeltrinelli.it\n`
+    + (conFelt ? `1) (la classifica delle librerie è già pronta: salta questo punto e lascia "bestseller" vuoto)\n` : ``
+      + `1) Cerca «classifica libri più venduti lafeltrinelli» e apri con web_fetch la pagina della classifica sul sito lafeltrinelli.it\n`
     + `   e riporta la sua TOP 10 nell'ordine mostrato, senza mescolare altre classifiche. Se la pagina non si apre, usa la classifica settimanale delle librerie Feltrinelli\n`
     + `   pubblicata da L'Espresso; se manca anche quella, la classifica dei più venduti di Mondadori Store (mondadoristore.it). Scrivi in "fonte" quale hai usato.\n`
     + `   Servono TUTTI E 10 i titoli: se una pagina ne mostra meno, aprila intera con web_fetch.\n`
+    )
     + `2) Cerca i «Bestseller in Libri» di Amazon.it (la classifica dei più venduti su Amazon Italia) e riporta i primi 10 nell'ordine mostrato (apri la pagina con web_fetch se serve, tutti e 10 i titoli).\n`
     + `3) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
     + (gen ? `Generi che leggono: ${gen}.\n` : "") + (temi ? `Temi che amano: ${temi}.\n` : "")
@@ -103,7 +135,7 @@ async function scopri(b: any) {
     + ` "copertina": indirizzo dell'immagine di copertina se lo vedi nella pagina aperta (per Amazon quelli che iniziano con https://m.media-amazon.com/images/), altrimenti null}],`
     + ` "amazon": [stessi campi di bestseller, con la posizione su Amazon e il voto medio mostrato da Amazon],`
     + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "simile_a": titolo di un loro libro amato}]}`;
-  const r = await chiedi(prompt, 4, 3);
+  const r = await chiedi(prompt, conFelt ? 2 : 4, 3);
   if (r.err) return { ok: false, error: r.err };
   const j = jsonDa(r.testo);
   if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
@@ -114,6 +146,7 @@ async function scopri(b: any) {
     voto: Number(x.voto) >= 1 && Number(x.voto) <= 5 ? Math.round(Number(x.voto) * 10) / 10 : null,
     copertina: /^https:\/\/(m\.media-amazon\.com|images-[a-z]+\.ssl-images-amazon\.com)\/images\/[^\s"']+$/.test(String(x.copertina || "")) ? String(x.copertina) : null,
   }));
+  if (conFelt) return { ok: true, fonte: "Classifica Feltrinelli · i più venduti di oggi", settimana: null, bestseller: felt, amazon: pulisci(j.amazon), simili: pulisci(j.simili), costo: r.costo };
   return { ok: true, fonte: j.fonte ? s(j.fonte, 60) : null, settimana: j.settimana ? s(j.settimana, 60) : null, bestseller: pulisci(j.bestseller), amazon: pulisci(j.amazon), simili: pulisci(j.simili), costo: r.costo };
 }
 

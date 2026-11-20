@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 68; // va tenuto uguale al numero in version.json
+const APP_VERSION = 69; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -935,11 +935,12 @@ async function maybeRefreshDiscover(force) {
   // Le copertine già trovate le volte prima si tengono (stesso titolo): non spariscono a ogni aggiornamento.
   const known = {};
   for (const it of [...((d && d.bestsellers) || []), ...((d && d.amazon) || []), ...((d && d.similar) || [])]) if (it.cover) known[normTitle(it.title)] = it;
-  const amazonImg = (u) => (/^https:\/\/(m\.media-amazon\.com|images-[a-z]+\.ssl-images-amazon\.com)\//.test(String(u || '')) ? u : '');
+  // Copertine date dalle classifiche stesse: Feltrinelli (sempre) e Amazon (quando il Bibliotecario le vede).
+  const amazonImg = (u) => (/^https:\/\/(m\.media-amazon\.com|images-[a-z]+\.ssl-images-amazon\.com|www\.lafeltrinelli\.it\/images)\//.test(String(u || '')) ? u : '');
   // Frasi sempre uguali: «3° in classifica» per i più venduti, «Simile a «…»» per i simili.
   const conv = (x, reason) => {
     const old = known[normTitle(x.titolo)];
-    return { title: x.titolo, authors: x.autore || '', isbn: x.isbn || (old && old.isbn) || '', publisher: x.editore || '', cover: (old && old.cover) || amazonImg(x.copertina), reason, stars: Number(x.voto) || (old && old.stars) || 0 };
+    return { title: x.titolo, authors: x.autore || '', isbn: x.isbn || (old && old.isbn) || '', publisher: x.editore || '', cover: amazonImg(x.copertina) || (old && old.cover) || '', reason, stars: Number(x.voto) || (old && old.stars) || 0 };
   };
   const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
   const out = { updatedAt: Date.now(), source: [r.fonte, r.settimana].filter(Boolean).join(' · '),

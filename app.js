@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 58; // va tenuto uguale al numero in version.json
+const APP_VERSION = 59; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -522,12 +522,16 @@ let claimsShown = false;
 const claimRevealed = new Set();
 const claimName = (id) => (claimsShown || claimRevealed.has(id) ? claims[id].name : '');
 
+/* Copertina piccola. Senza immagine (o se non si carica) compare un segnaposto colorato con titolo e autore. */
+const phInner = (b) => `<span class="ph-title">${esc(b.title || 'Senza titolo')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(b.authors))}</span>`;
 function coverHtml(book, big) {
+  if (!book.cover) return phCoverHtml(book, big);
   const initial = esc((book.title || '?').trim().charAt(0).toUpperCase() || '?');
-  const inner = book.cover
-    ? `<img src="${esc(book.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
-    : initial;
-  return `<div class="cover${big ? ' big' : ''}">${inner}</div>`;
+  return `<div class="cover${big ? ' big' : ''}"><img src="${esc(book.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}" data-ph="${esc(phInner(book))}" data-color="${esc(bookColor(book))}"></div>`;
+}
+function phCoverHtml(book, big) {
+  const c = bookColor(book);
+  return `<div class="cover ph-cover${big ? ' big' : ''}" style="background:${c};color:${inkOn(c)}">${phInner(book)}</div>`;
 }
 
 function isIncomplete(b) {
@@ -897,7 +901,7 @@ function authorMoreHtml(name) {
   if (!items.length) return st.failed ? `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Non riesco a raggiungere i cataloghi: riprova più tardi.</p></section>` : '';
   return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)} · ${items.length}</h3>
     <p class="hint">Dai cataloghi: quelli che non avete ancora.</p>
-    ${items.map((x) => `<div class="book more-book"><span class="cover"${x.cover ? ` style="background-image:url('${esc(x.cover)}')"` : ''}>${x.cover ? '' : esc((x.title || '?').charAt(0))}</span>
+    ${items.map((x) => `<div class="book more-book">${coverHtml(x)}
       <span class="book-info"><span class="book-title">${esc(x.title)}</span><span class="book-author">${esc([x.year, x.publisher].filter(Boolean).join(' · '))}</span>
       <span class="more-actions"><button class="chip" data-more-wish="${esc(name)}|${st.items.indexOf(x)}">＋ Desideri</button>${storeLinks(x).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('')}
   </section>`;
@@ -916,6 +920,11 @@ async function loadAuthorMore(name) {
   } catch (e) { st.items = []; st.failed = true; }
   st.loading = false;
   if (filterParts().includes('author:' + name)) renderList();
+  const missing = st.items.filter((x) => !x.cover && x.isbn).slice(0, 20);
+  if (missing.length) {
+    await Promise.all(missing.map(async (x) => { x.cover = await probeCover(x.isbn); }));
+    if (missing.some((x) => x.cover) && filterParts().includes('author:' + name)) renderList();
+  }
 }
 function addAuthorMoreToWish(key) {
   const i = key.lastIndexOf('|');
@@ -1233,7 +1242,13 @@ function renderList() {
 /* Se una copertina non si carica, al suo posto compare l'iniziale del titolo. */
 document.addEventListener('error', (e) => {
   const el = e.target;
-  if (el && el.tagName === 'IMG' && el.dataset.initial && el.parentNode) el.parentNode.textContent = el.dataset.initial;
+  if (!el || el.tagName !== 'IMG' || !el.dataset.initial || !el.parentNode) return;
+  const box = el.parentNode;
+  if (el.dataset.ph && box.classList.contains('cover')) {
+    box.classList.add('ph-cover');
+    box.style.background = el.dataset.color; box.style.color = inkOn(el.dataset.color);
+    box.innerHTML = el.dataset.ph;
+  } else box.textContent = el.dataset.initial;
 }, true);
 
 /* ================= ANTEPRIMA RAPIDA ================= */
@@ -2626,13 +2641,26 @@ let backQueued = false;
 function topLayer() {
   if (!$('peek').hidden && !$('peek').classList.contains('float')) return 'peek';
   const open = LAYERS.find((id) => !$(id).hidden);
-  return open || (backTo ? 'filtered' : null);
+  if (open) return open;
+  if (backTo) return 'filtered';
+  // Una pagina diversa dalla libreria di partenza (Desideri, Audible, un filtro, una ricerca, un autore…):
+  // il gesto indietro riporta alla libreria invece di chiudere l'app.
+  const q = $('search') && $('search').value.trim();
+  return viewMode !== 'library' || filterGenre || filterList || q ? 'home' : null;
+}
+
+function goHome() {
+  viewMode = 'library'; filterGenre = ''; filterList = ''; groupBy = ''; groupFor = '';
+  if ($('search').value) $('search').value = '';
+  renderList();
+  window.scrollTo(0, 0);
 }
 
 function closeLayer(layer) {
   if (layer === 'peek') closePeek();
   else if (layer === 'scanner') closeScanner();
   else if (layer === 'filtered') $('btn-back').click();
+  else if (layer === 'home') goHome();
   else hide(layer);
 }
 
@@ -3105,6 +3133,7 @@ function init() {
     if (!from) return;
     viewMode = from.viewMode; filterGenre = from.filterGenre; filterList = from.filterList;
     renderList();
+    if (from.reopen === 'year') { renderYear(); show('year'); return; }
     const book = state.books.find((b) => b.id === from.id);
     if (book) openView(book);
   });
@@ -3357,13 +3386,15 @@ function init() {
     const c = e.target.closest('[data-id]'); if (c) { const b = state.books.find((x) => x.id === c.dataset.id); if (b) openView(b); return; }
     const au = e.target.closest('[data-author]');
     if (au) {
-      hide('year'); viewMode = 'library'; backTo = null; $('search').value = '';
+      backTo = { viewMode, filterGenre, filterList, reopen: 'year' };
+      hide('year'); viewMode = 'library'; $('search').value = '';
       filterGenre = 'author:' + au.dataset.author; groupBy = '';
       renderList(); window.scrollTo(0, 0);
       return;
     }
     if (e.target.closest('[data-undated]')) {
-      hide('year'); viewMode = 'library'; backTo = null;
+      backTo = { viewMode, filterGenre, filterList, reopen: 'year' };
+      hide('year'); viewMode = 'library';
       filterGenre = 'status:read' + (yearWho ? '|owner:' + yearWho : '');
       if (viewKind === 'shelf') viewKind = 'list';
       renderList(); window.scrollTo(0, 0);

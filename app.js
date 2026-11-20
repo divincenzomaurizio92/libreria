@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 70; // va tenuto uguale al numero in version.json
+const APP_VERSION = 71; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1225,7 +1225,9 @@ function renderSugg() {
         ${Number(it.stars) ? `<p class="sugg-meta">Voto medio dei lettori: ★ ${fmtRating(Math.round(it.stars * 10) / 10)} su 5</p>` : ''}
       </div>
     </div>
-    <p class="sugg-plot">${it.plot ? esc(it.plot.length > 600 ? it.plot.slice(0, 600).replace(/\s+\S*$/, '') + '…' : it.plot) : it.plotTried ? '' : '<span class="claude-wait">Cerco la trama…</span>'}</p>
+    <p class="sugg-plot">${it.plot ? (it.plot.length > 600 && !it.plotOpen
+      ? esc(it.plot.slice(0, 600).replace(/\s+\S*$/, '')) + '… <button class="link-btn" data-sugg-more>Leggi tutto</button>'
+      : esc(it.plot)) : it.plotTried ? '' : '<span class="claude-wait">Cerco la trama…</span>'}</p>
     <button class="btn primary wide" data-sugg-wish>＋ Aggiungi ai desideri</button>
     <h4 class="sugg-h">Dove comprarlo</h4>
     <div class="sugg-stores">${storeLinks(it).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</div>
@@ -3735,6 +3737,7 @@ function init() {
   $('sugg').addEventListener('click', (e) => {
     if (e.target === $('sugg') || e.target.closest('[data-sugg-close]')) { hide('sugg'); return; }
     if (e.target.closest('[data-sugg-wish]')) { addSuggToWish(suggOpen); return; }
+    if (e.target.closest('[data-sugg-more]')) { suggOpen.plotOpen = true; renderSugg(); return; }
     const au = e.target.closest('[data-sugg-author]');
     if (au) {
       hide('sugg');

@@ -915,3 +915,4 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .rank-badge { top: auto !important; bottom: 7px; left: 6px !important; }
 .chart-shelves .own-badge { top: 6px; bottom: auto; left: 6px; }
 .discover { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.sugg-plot .link-btn { display: inline; padding: 0; font-size: inherit; }

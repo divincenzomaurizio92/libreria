@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 60; // va tenuto uguale al numero in version.json
+const APP_VERSION = 61; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -898,6 +898,75 @@ function volumeOf(b) {
   base = norm(base.replace(/[([].*?[)\]]/g, ' ')).replace(/[^a-z0-9]+/g, ' ').trim();
   return { num, base };
 }
+/* ---------- Claude nella pagina autore ----------
+   Su richiesta (costa qualche centesimo): Claude cerca sul web i libri dell'autore nella vostra lingua che vi mancano,
+   con i volumi mancanti delle saghe. La risposta resta sul telefono per 30 giorni. */
+const claudeAuthor = {}; // nome → { loading } | { error } | { at, riassunto, libri }
+function claudeAuthorKey(name) { return 'libreria.claude.autore.' + norm(name); }
+function claudeAuthorState(name) {
+  if (!claudeAuthor[name]) {
+    try { const c = JSON.parse(localStorage.getItem(claudeAuthorKey(name)) || 'null'); if (c && Date.now() - c.at < 30 * 864e5) claudeAuthor[name] = c; } catch (e) { /* niente */ }
+  }
+  return claudeAuthor[name] || null;
+}
+async function askClaudeAuthor(name) {
+  if (typeof askClaude !== 'function' || !cloudReady()) return toast('Per chiedere a Claude serve la libreria online: Impostazioni → La vostra libreria online.');
+  const mine = state.books.filter((b) => authorsOf(b).some((a) => norm(a) === norm(name)));
+  const langs = {}; mine.forEach((b) => { if (b.lang) langs[b.lang.slice(0, 2)] = (langs[b.lang.slice(0, 2)] || 0) + 1; });
+  const lingua = (Object.entries(langs).sort((a, b) => b[1] - a[1])[0] || ['it'])[0];
+  claudeAuthor[name] = { loading: true };
+  renderList();
+  const r = await askClaude({ azione: 'autore', nome: name, lingua, vostri: mine.map((b) => ({ titolo: [b.title, b.subtitle].filter(Boolean).join(' – '), numero: seriesNumOf(b) || volumeOf(b).num || null })) });
+  if (!r || !r.ok) { claudeAuthor[name] = { error: (r && r.error) || 'Claude non risponde' }; }
+  else {
+    claudeAuthor[name] = { at: Date.now(), riassunto: r.riassunto || '', libri: r.libri || [], costo: r.costo || 0 };
+    try { localStorage.setItem(claudeAuthorKey(name), JSON.stringify(claudeAuthor[name])); } catch (e) { /* niente */ }
+    // Copertine di riserva per i libri con ISBN.
+    const st = claudeAuthor[name];
+    Promise.all(st.libri.filter((x) => x.isbn).slice(0, 20).map(async (x) => { x.cover = await probeCover(x.isbn); })).then(() => {
+      try { localStorage.setItem(claudeAuthorKey(name), JSON.stringify(st)); } catch (e) { /* niente */ }
+      if (filterParts().includes('author:' + name)) renderList();
+    });
+  }
+  if (filterParts().includes('author:' + name)) renderList();
+}
+function claudeAuthorHtml(name) {
+  const st = claudeAuthorState(name);
+  const btn = (label) => `<button class="chip claude-ask" data-claude-author="${esc(name)}">✨ ${label}</button>`;
+  if (!st) return `<section class="claude-box"><p class="hint">Claude può cercare sul web i libri di ${esc(name)} che vi mancano, con i volumi delle saghe nell'ordine giusto.</p>${btn('Chiedi a Claude cosa manca')}</section>`;
+  if (st.loading) return `<section class="claude-box"><p class="hint claude-wait">✨ Claude sta cercando… di solito ci vuole meno di un minuto.</p></section>`;
+  if (st.error) return `<section class="claude-box"><p class="hint">Claude non ha risposto: ${esc(st.error)}.</p>${btn('Riprova')}</section>`;
+  const mine = state.books;
+  const have = (x) => mine.some((b) => (x.isbn && b.isbn === x.isbn) || (norm(b.title) === norm(x.titolo) && (!x.numero || (seriesNumOf(b) || volumeOf(b).num) === x.numero)));
+  const libri = st.libri.filter((x) => !have(x));
+  const days = Math.floor((Date.now() - st.at) / 864e5);
+  return `<section class="claude-box"><h3 class="shelf-label">✨ Secondo Claude · ${libri.length}</h3>
+    ${st.riassunto ? `<p class="claude-sum">${esc(st.riassunto)}</p>` : ''}
+    ${libri.map((x) => `<div class="book more-book">${coverHtml({ title: x.titolo, authors: name, cover: x.cover || '' })}
+      <span class="book-info"><span class="book-title">${esc(x.titolo)}${x.numero && !String(x.titolo).includes(String(x.numero)) ? ' n. ' + x.numero : ''}</span>
+      <span class="book-author">${esc([x.saga && x.saga !== x.titolo ? x.saga + (x.numero ? ' n. ' + x.numero : '') : '', x.anno, x.editore, x.prezzo ? euro(x.prezzo) : ''].filter(Boolean).join(' · '))}</span>
+      ${x.nota ? `<span class="book-author claude-note">${esc(x.nota)}</span>` : ''}
+      <span class="more-actions"><button class="chip" data-claude-wish="${esc(name)}|${st.libri.indexOf(x)}">＋ Desideri</button>${storeLinks({ title: x.titolo + (x.numero && !String(x.titolo).includes(String(x.numero)) ? ' ' + x.numero : ''), authors: name }).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('') || '<p class="hint">Claude non ha trovato altri libri che vi mancano.</p>'}
+    <p class="hint claude-foot">Risposta di ${days ? days === 1 ? 'ieri' : days + ' giorni fa' : 'oggi'}. Claude può sbagliare: controlla prima di comprare. ${btn('Chiedi di nuovo')}</p>
+  </section>`;
+}
+function addClaudeToWish(key) {
+  const i = key.lastIndexOf('|'), name = key.slice(0, i);
+  const x = ((claudeAuthorState(name) || {}).libri || [])[Number(key.slice(i + 1))];
+  if (!x) return;
+  if (!state.wishlists.length) state.wishlists.push('Da comprare');
+  const list = state.wishlists[0];
+  const b = { id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: x.isbn || '', title: x.titolo, subtitle: x.numero && !String(x.titolo).includes(String(x.numero)) ? 'Volume ' + x.numero : '', authors: name, publisher: x.editore || '',
+    year: x.anno || '', pages: '', cover: x.cover || '', genres: [], owners: [], list, status: '', media: [], price: x.prezzo ? String(x.prezzo) : '',
+    series: x.saga || '', seriesNum: x.numero ? String(x.numero) : '' };
+  state.books.push(b);
+  saveState();
+  renderList();
+  toast('«' + x.titolo + '» aggiunto ai desideri: ' + list);
+  // Copertina e trama dai cataloghi, in silenzio.
+  if (navigator.onLine) batchLookup({ isbn: b.isbn, q: b.isbn ? '' : [b.title, name].join(' '), state: 'wait', id: b.id }).then(() => renderList()).catch(() => {});
+}
+
 function authorMoreHtml(name) {
   const head = `<h3 class="shelf-label">Altri libri di ${esc(name)}</h3>`;
   const st = authorMore[name];
@@ -916,6 +985,8 @@ function authorMoreHtml(name) {
       <span class="more-actions"><button class="chip" data-more-wish="${esc(name)}|${st.items.indexOf(x)}">＋ Desideri</button>${storeLinks(x).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`;
   const same = items.filter((x) => x.sameLang), other = items.filter((x) => !x.sameLang);
   const langName = LANG_NAMES[st.lang] || 'la vostra lingua';
+  const cl = claudeAuthorState(name);
+  if (cl && cl.libri) return `<details class="author-more more-other"><summary>Dai cataloghi (Google Books) · ${items.length}</summary>${same.concat(other).map(row).join('')}</details>`;
   return `<section class="author-more">${head.replace('</h3>', ' · ' + items.length + '</h3>')}
     <p class="hint">Dai cataloghi, quelli che non avete: prima in ${langName}, in ordine di uscita e di volume.</p>
     ${same.map(row).join('') || `<p class="hint">Nessun altro suo libro in ${langName} nei cataloghi.</p>`}
@@ -1253,7 +1324,7 @@ function renderList() {
       if (homeOrder) books = homeOrder;
     }
   }
-  if (authorPage && total) $('list').insertAdjacentHTML('beforeend', authorMoreHtml(authorPage.slice(7)));
+  if (authorPage && total) $('list').insertAdjacentHTML('beforeend', claudeAuthorHtml(authorPage.slice(7)) + authorMoreHtml(authorPage.slice(7)));
   // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».
   if (wish && !q && !filterList) $('list').insertAdjacentHTML('afterbegin', discoverHtml());
   visibleIds = books.map((b) => b.id);
@@ -2852,7 +2923,11 @@ function init() {
   }, { passive: true });
   $('list').addEventListener('touchend', () => { pinch = null; }, { passive: true });
   $('list').addEventListener('click', (e) => { const d = e.target.closest('[data-disc]'); if (d) openDiscover(Number(d.dataset.disc)); });
-  $('list').addEventListener('click', (e) => { const m = e.target.closest('[data-more-wish]'); if (m) { e.stopPropagation(); addAuthorMoreToWish(m.dataset.moreWish); } });
+  $('list').addEventListener('click', (e) => {
+    const m = e.target.closest('[data-more-wish]'); if (m) { e.stopPropagation(); addAuthorMoreToWish(m.dataset.moreWish); return; }
+    const c = e.target.closest('[data-claude-author]'); if (c) { e.stopPropagation(); askClaudeAuthor(c.dataset.claudeAuthor); return; }
+    const w = e.target.closest('[data-claude-wish]'); if (w) { e.stopPropagation(); addClaudeToWish(w.dataset.claudeWish); }
+  });
 
   // La testata si ritira scorrendo verso il basso e torna risalendo.
   let lastY = 0;

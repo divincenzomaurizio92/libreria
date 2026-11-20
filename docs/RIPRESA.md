@@ -92,6 +92,11 @@ mese per mese, copertine. **Importa da altre app** (Impostazioni): CSV di Goodre
 Library, Excel, oppure elenco incollato (ISBN o "Titolo - Autore"); doppioni saltati, poi completamento dai
 cataloghi come la raffica (anche per titolo, se manca l'ISBN).
 
+**Claude collegato (v61):** funzione Supabase `libreria-claude` su DR HUB (codice in `supabase/functions/libreria-claude/`),
+solo per i membri della libreria. Usa la chiave `LIBRERIA_ANTHROPIC_KEY` se esiste, altrimenti `ANTHROPIC_API_KEY` già
+salvata per l'HUB. Prima funzione: nella pagina autore «✨ Chiedi a Claude cosa manca» (ricerca sul web, saghe e volumi
+mancanti nella vostra lingua; risposta tenuta sul telefono 30 giorni). Modello Sonnet 5.5, al massimo 5 ricerche.
+
 ---
 
 ## 4. Cosa manca, in ordine

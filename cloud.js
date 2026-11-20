@@ -53,6 +53,21 @@ async function unclaimBook(bookId) {
   toast('Di nuovo libero: chi apre il link può prenderlo.');
 }
 
+/* Claude: la domanda passa dalla funzione «libreria-claude» su Supabase, che tiene la chiave. */
+async function askClaude(body) {
+  if (!cloudReady()) return { ok: false, error: 'serve la libreria online' };
+  if (!navigator.onLine) return { ok: false, error: 'serve la connessione' };
+  try {
+    const { data, error } = await sb.functions.invoke('libreria-claude', { body });
+    if (error) {
+      let msg = error.message || 'Claude non risponde';
+      try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* niente */ }
+      return { ok: false, error: msg };
+    }
+    return data || { ok: false, error: 'risposta vuota' };
+  } catch (e) { return { ok: false, error: 'Claude non risponde: riprova tra poco' }; }
+}
+
 /* Crea (o riusa) il link della lista e lo passa a WhatsApp, Telegram, email… */
 async function shareList(list) {
   if (!list) return;

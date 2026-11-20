@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 64; // va tenuto uguale al numero in version.json
+const APP_VERSION = 65; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -931,8 +931,8 @@ async function maybeRefreshDiscover(force) {
   // Frasi sempre uguali: «3° in classifica» per i più venduti, «Perché vi è piaciuto «…»» per i simili.
   const conv = (x, reason) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason });
   const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
-  const out = { updatedAt: Date.now(),
-    bestsellers: best.map((x, i) => conv(x, (x.posizione || i + 1) + '° in classifica')),
+  const out = { updatedAt: Date.now(), source: [r.fonte, r.settimana].filter(Boolean).join(' · '),
+    bestsellers: best.map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° in classifica'), rank: x.posizione || i + 1 })),
     similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Perché vi è piaciuto «' + x.simile_a + '»' : '')) };
   const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
   save();
@@ -1139,9 +1139,7 @@ function addAuthorMoreToWish(key) {
 function discoverHtml() {
   const d = loadDiscover();
   discoverItems = [];
-  const rail = (title, items) => {
-    if (!items || !items.length) return '';
-    const cells = items.slice(0, 15).map((it) => {
+  const cellOf = (it, rank) => {
       const i = discoverItems.push(it) - 1;
       const own = haveIt(it);
       const color = SPINE_COLORS[hashOf(it.title || '') % SPINE_COLORS.length];
@@ -1149,14 +1147,26 @@ function discoverHtml() {
         ? `<img src="${esc(httpsUrl(it.cover))}" alt="" loading="lazy" referrerpolicy="no-referrer">`
         : `<span class="ph-title">${esc(it.title || '')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(it.authors))}</span>`;
       return `<button class="cell disc" data-disc="${i}">
-        <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${own ? `<span class="badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
+        <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${rank ? `<span class="rank-badge">${rank}</span>` : ''}${own ? `<span class="badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
         <span class="cell-title">${esc(it.title || '')}</span>
-        ${it.reason ? `<span class="disc-reason">${esc(it.reason)}</span>` : ''}
+        ${!rank && it.reason ? `<span class="disc-reason">${esc(it.reason)}</span>` : ''}
       </button>`;
-    }).join('');
-    return `<p class="disc-sub">${title}</p><div class="rail">${cells}</div>`;
   };
-  const body = d ? rail('I più venduti in Italia', d.bestsellers) + rail('Simili ai vostri preferiti', d.similar) : '';
+  const rail = (title, items) => {
+    if (!items || !items.length) return '';
+    return `<p class="disc-sub">${title}</p><div class="rail">${items.slice(0, 15).map((it) => cellOf(it, 0)).join('')}</div>`;
+  };
+  // La classifica sta su mensole di legno, come la libreria, con il numero della posizione sulla copertina.
+  const chart = (items) => {
+    if (!items || !items.length) return '';
+    const cols = gridCols(), list = items.slice(0, 10);
+    let rows = '';
+    for (let k = 0; k < list.length; k += cols) {
+      rows += `<div class="shelf-line"><div class="shelf-books" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${list.slice(k, k + cols).map((it, j) => cellOf(it, it.rank || k + j + 1)).join('')}</div><div class="plank"></div></div>`;
+    }
+    return `<p class="disc-sub">I più venduti in Italia</p>${d.source ? `<p class="disc-src">${esc(d.source)}</p>` : ''}<div class="chart-shelves">${rows}</div>`;
+  };
+  const body = d ? chart(d.bestsellers) + rail('Simili ai vostri preferiti', d.similar) : '';
   const canAsk = typeof cloudReady === 'function' && cloudReady();
   return `<section class="rail-sec discover">
     <div class="disc-head"><h3 class="rail-label">Da scoprire</h3>${d && canAsk ? `<button class="chip disc-refresh" data-disc-now ${discoverBusy ? 'disabled' : ''}>

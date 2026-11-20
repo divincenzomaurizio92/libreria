@@ -88,11 +88,10 @@ async function scopri(b: any) {
   const avete = (Array.isArray(b.avete) ? b.avete : []).slice(0, 250).map((x: any) => s(x, 60)).join("; ");
   const oggi = new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "long", year: "numeric" }).format(new Date());
   const prompt = `Sei il bibliotecario di una famiglia italiana. Oggi è ${oggi}.\n`
-    + `1) Cerca la classifica settimanale dei libri più venduti in Italia di «La Lettura» (supplemento del Corriere della Sera), la più recente uscita:\n`
-    + `   riporta la sua TOP 10 GENERALE esattamente nell'ordine pubblicato, senza mescolare altre classifiche.\n`
-    + `   Spesso è ripresa da altri siti (ilLibraio.it, Libreriamo, ANSA, Corriere.it): va bene leggerla lì. Se proprio non trovi quella di La Lettura,\n`
-    + `   usa nell'ordine: Tuttolibri (La Stampa), poi la classifica settimanale di ilLibraio.it, poi i bestseller della settimana di IBS; scrivi in "fonte" quale hai usato.\n`
-    + `   Servono TUTTI E 10 i titoli: se i risultati della ricerca ne mostrano meno, apri la pagina della classifica con web_fetch e leggila intera.\n`
+    + `1) Cerca «classifica libri più venduti lafeltrinelli» e apri con web_fetch la pagina della classifica sul sito lafeltrinelli.it\n`
+    + `   e riporta la sua TOP 10 nell'ordine mostrato, senza mescolare altre classifiche. Se la pagina non si apre, usa la classifica settimanale delle librerie Feltrinelli\n`
+    + `   pubblicata da L'Espresso; se manca anche quella, la classifica dei più venduti di Mondadori Store (mondadoristore.it). Scrivi in "fonte" quale hai usato.\n`
+    + `   Servono TUTTI E 10 i titoli: se una pagina ne mostra meno, aprila intera con web_fetch.\n`
     + `2) Cerca i «Bestseller in Libri» di Amazon.it (la classifica dei più venduti su Amazon Italia) e riporta i primi 10 nell'ordine mostrato (apri la pagina con web_fetch se serve, tutti e 10 i titoli).\n`
     + `3) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
     + (gen ? `Generi che leggono: ${gen}.\n` : "") + (temi ? `Temi che amano: ${temi}.\n` : "")
@@ -100,7 +99,7 @@ async function scopri(b: any) {
     + `Sii rapido: una ricerca per ciascuna classifica basta; i libri simili scegli tu, senza cercarli uno per uno.\n`
     + `Non inventare: solo libri che esistono in italiano; se non sei sicuro dell'ISBN metti null.\n`
     + `Per ogni libro simile indica in "simile_a" il titolo ESATTO di uno dei loro libri amati qui sopra a cui somiglia di più.\n`
-    + `Rispondi SOLO con il JSON: {"fonte": "Classifica di La Lettura" (o quella usata), "settimana": periodo delle vendite come scritto, es. "dal 9 al 15 novembre", "bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null, "voto": media delle stelle dei lettori da 1 a 5 (es. 4.6) se la vedi su Amazon o Goodreads, altrimenti null,`
+    + `Rispondi SOLO con il JSON: {"fonte": "Classifica Feltrinelli" (o quella usata), "settimana": periodo delle vendite se scritto, es. "dal 9 al 15 novembre", altrimenti null, "bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null, "voto": media delle stelle dei lettori da 1 a 5 (es. 4.6) se la vedi su Amazon o Goodreads, altrimenti null,`
     + ` "copertina": indirizzo dell'immagine di copertina se lo vedi nella pagina aperta (per Amazon quelli che iniziano con https://m.media-amazon.com/images/), altrimenti null}],`
     + ` "amazon": [stessi campi di bestseller, con la posizione su Amazon e il voto medio mostrato da Amazon],`
     + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "simile_a": titolo di un loro libro amato}]}`;

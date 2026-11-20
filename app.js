@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 59; // va tenuto uguale al numero in version.json
+const APP_VERSION = 60; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -886,37 +886,68 @@ function haveIt(item) {
 }
 /* ---------- Pagina autore: gli altri suoi libri, dai cataloghi ----------
    Si cercano su Google Books (edizioni italiane prima) e si tolgono quelli che avete già. */
-const authorMore = {}; // nome → { loading } oppure { items }
+const authorMore = {}; // nome → { loading } oppure { items, lang }
+const LANG_NAMES = { it: 'italiano', en: 'inglese', fr: 'francese', de: 'tedesco', es: 'spagnolo', ja: 'giapponese', pt: 'portoghese' };
+/* Numero di volume e nome della saga dal titolo: «Pokémon. La grande avventura 5», «… Vol. 11», «#3», «tome 3». */
+function volumeOf(b) {
+  const full = [b.title, b.subtitle].filter(Boolean).join(' ');
+  const m = full.match(/(?:\bvol(?:ume)?\.?|\bn\.|\bnr\.?|#|\btom[eo]\b|\blibro\b|\bnumero\b|\bpart[ei]?\b)\s*(\d{1,3})\b/i) || String(b.title || '').match(/\s(\d{1,3})\s*$/);
+  const num = Number(b.seriesNum) || (m ? Number(m[1]) : 0);
+  let base = String(b.title || '');
+  if (m && b.title && b.title.includes(m[0].trim())) base = base.replace(m[0].trim(), '');
+  base = norm(base.replace(/[([].*?[)\]]/g, ' ')).replace(/[^a-z0-9]+/g, ' ').trim();
+  return { num, base };
+}
 function authorMoreHtml(name) {
+  const head = `<h3 class="shelf-label">Altri libri di ${esc(name)}</h3>`;
   const st = authorMore[name];
-  if (!st) {
-    authorMore[name] = { loading: true };
-    loadAuthorMore(name);
-    return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Cerco nei cataloghi…</p></section>`;
+  if (!st || st.loading) {
+    if (!st) { authorMore[name] = { loading: true }; loadAuthorMore(name); }
+    return `<section class="author-more">${head}<p class="hint">Cerco nei cataloghi…</p></section>`;
   }
-  if (st.loading) return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Cerco nei cataloghi…</p></section>`;
-  const t = (b) => norm(b.title).replace(/\s+/g, ' ');
+  // Già vostri: stesso ISBN, oppure stessa saga e stesso numero, oppure stesso titolo.
   const mine = state.books.filter((b) => authorsOf(b).some((a) => norm(a) === norm(name)));
-  const items = st.items.filter((x) => !state.books.some((b) => (x.isbn && b.isbn === x.isbn)) && !mine.some((b) => t(b) === t(x) || t(b).startsWith(t(x)) || t(x).startsWith(t(b))));
-  if (!items.length) return st.failed ? `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)}</h3><p class="hint">Non riesco a raggiungere i cataloghi: riprova più tardi.</p></section>` : '';
-  return `<section class="author-more"><h3 class="shelf-label">Altri libri di ${esc(name)} · ${items.length}</h3>
-    <p class="hint">Dai cataloghi: quelli che non avete ancora.</p>
-    ${items.map((x) => `<div class="book more-book">${coverHtml(x)}
-      <span class="book-info"><span class="book-title">${esc(x.title)}</span><span class="book-author">${esc([x.year, x.publisher].filter(Boolean).join(' · '))}</span>
-      <span class="more-actions"><button class="chip" data-more-wish="${esc(name)}|${st.items.indexOf(x)}">＋ Desideri</button>${storeLinks(x).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('')}
+  const mineKeys = new Set(mine.map((b) => { const v = volumeOf(b); return v.base + '|' + (seriesNumOf(b) || v.num); }));
+  const owned = (x) => state.books.some((b) => x.isbn && b.isbn === x.isbn) || mineKeys.has(x.vol.base + '|' + x.vol.num);
+  const items = st.items.filter((x) => !owned(x));
+  if (!items.length) return st.failed ? `<section class="author-more">${head}<p class="hint">Non riesco a raggiungere i cataloghi: riprova più tardi.</p></section>` : '';
+  const row = (x) => `<div class="book more-book">${coverHtml(x)}
+      <span class="book-info"><span class="book-title">${esc(x.title)}${x.vol.num && !x.title.includes(String(x.vol.num)) ? ' · n. ' + x.vol.num : ''}</span><span class="book-author">${esc([x.year, x.publisher].filter(Boolean).join(' · '))}</span>
+      <span class="more-actions"><button class="chip" data-more-wish="${esc(name)}|${st.items.indexOf(x)}">＋ Desideri</button>${storeLinks(x).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`;
+  const same = items.filter((x) => x.sameLang), other = items.filter((x) => !x.sameLang);
+  const langName = LANG_NAMES[st.lang] || 'la vostra lingua';
+  return `<section class="author-more">${head.replace('</h3>', ' · ' + items.length + '</h3>')}
+    <p class="hint">Dai cataloghi, quelli che non avete: prima in ${langName}, in ordine di uscita e di volume.</p>
+    ${same.map(row).join('') || `<p class="hint">Nessun altro suo libro in ${langName} nei cataloghi.</p>`}
+    ${other.length ? `<details class="more-other"><summary>In altre lingue · ${other.length}</summary>${other.map(row).join('')}</details>` : ''}
   </section>`;
 }
 async function loadAuthorMore(name) {
   const st = authorMore[name];
+  // La lingua è quella dei suoi libri che avete già (di solito l'italiano).
+  const langs = {};
+  for (const b of state.books) if (authorsOf(b).some((a) => norm(a) === norm(name)) && b.lang) langs[b.lang] = (langs[b.lang] || 0) + 1;
+  const lang = (Object.entries(langs).sort((a, b) => b[1] - a[1])[0] || ['it'])[0].slice(0, 2);
+  st.lang = lang;
   try {
     const q = encodeURIComponent('inauthor:"' + name + '"');
-    let data = await getJson(googleUrl('maxResults=30&langRestrict=it&printType=books&q=' + q));
-    if (!(data.items || []).length) data = await getJson(googleUrl('maxResults=30&printType=books&q=' + q));
+    const [pref1, pref2, any] = await Promise.all([
+      getJson(googleUrl('maxResults=40&printType=books&langRestrict=' + lang + '&q=' + q)),
+      getJson(googleUrl('maxResults=40&startIndex=40&printType=books&langRestrict=' + lang + '&q=' + q)).catch(() => ({})),
+      getJson(googleUrl('maxResults=40&printType=books&q=' + q)).catch(() => ({})),
+    ]);
     const seen = new Set();
-    st.items = (data.items || []).map(fromGoogleItem).filter((b) => b.title && authorsOf(b).some((a) => norm(a) === norm(name)))
-      .map((b) => ({ ...b, publisher: cleanPublisher(b.publisher), cover: (b.cover || '').replace(/^http:/, 'https:') }))
-      .filter((b) => { const k = norm(b.title); if (seen.has(k)) return false; seen.add(k); return true; })
-      .sort((a, b) => (Number(a.year) || 9999) - (Number(b.year) || 9999));
+    const all = [...(pref1.items || []), ...(pref2.items || []), ...(any.items || [])].map(fromGoogleItem)
+      .filter((b) => b.title && authorsOf(b).some((a) => norm(a) === norm(name)))
+      .map((b) => ({ ...b, publisher: cleanPublisher(b.publisher), cover: (b.cover || '').replace(/^http:/, 'https:'), vol: volumeOf(b) }))
+      // Una sola edizione per titolo e lingua (lo stesso libro esce spesso più volte).
+      .filter((b) => { const k = b.vol.base + '|' + b.vol.num + '|' + (b.lang || '').slice(0, 2); if (seen.has(k) || (b.isbn && seen.has(b.isbn))) return false; seen.add(k); if (b.isbn) seen.add(b.isbn); return true; });
+    for (const b of all) b.sameLang = (b.lang || lang).slice(0, 2) === lang;
+    // Le saghe stanno insieme, in ordine di volume, al posto della loro prima uscita; il resto in ordine di uscita.
+    const first = {};
+    for (const b of all) if (b.vol.num) first[b.vol.base] = Math.min(first[b.vol.base] || 9999, Number(b.year) || 9999);
+    const when = (b) => (b.vol.num ? first[b.vol.base] : Number(b.year) || 9999);
+    st.items = all.sort((a, b) => when(a) - when(b) || (a.vol.num && b.vol.num && a.vol.base === b.vol.base ? a.vol.num - b.vol.num : a.vol.base.localeCompare(b.vol.base)) || (Number(a.year) || 9999) - (Number(b.year) || 9999));
   } catch (e) { st.items = []; st.failed = true; }
   st.loading = false;
   if (filterParts().includes('author:' + name)) renderList();
@@ -1104,7 +1135,14 @@ function renderList() {
   const seriesPage = !wish && !audio && filterParts().find((p) => p.startsWith('series:'));
   const authorPage = !wish && !audio && filterParts().find((p) => p.startsWith('author:'));
   if (seriesPage) books.sort((a, b) => (seriesNumOf(a) || 999) - (seriesNumOf(b) || 999));
-  else if (authorPage) books.sort((a, b) => (Number(a.year) || 9999) - (Number(b.year) || 9999));
+  else if (authorPage) {
+    // Anche i vostri: le saghe insieme e in ordine di volume, il resto in ordine di uscita.
+    const key = (b) => { const v = volumeOf(b); return { num: seriesNumOf(b) || v.num, base: b.series ? norm(b.series) : v.base }; };
+    const first = {};
+    for (const b of books) { const k = key(b); if (k.num) first[k.base] = Math.min(first[k.base] || 9999, Number(b.year) || 9999); }
+    const when = (b) => { const k = key(b); return k.num ? first[k.base] : Number(b.year) || 9999; };
+    books.sort((a, b) => { const ka = key(a), kb = key(b); return when(a) - when(b) || (ka.num && kb.num && ka.base === kb.base ? ka.num - kb.num : ka.base.localeCompare(kb.base)) || (Number(a.year) || 9999) - (Number(b.year) || 9999); });
+  }
 
   $('tab-library').textContent = 'Libreria (' + owned.length + ')';
   $('tab-wish').textContent = 'Desideri (' + wished.length + ')';

@@ -850,3 +850,5 @@ body::before {
 .cover.big.ph-cover .ph-author, .year-cover .cover.ph-cover .ph-author { font-size: 9px; }
 a.chip { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; line-height: 1; }
 .more-actions .chip { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.more-other { margin-top: 16px; }
+.more-other summary { cursor: pointer; padding: 10px 0; color: var(--muted); font-weight: 600; }

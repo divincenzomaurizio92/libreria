@@ -114,6 +114,7 @@ async function syncNow() {
     saveSyncState();
     setCloudStatus('ok', '');
     if (changedLocally) { renderList(); refreshColors(); if (!$('view').hidden) { const b = state.books.find((x) => x.id === viewId); if (b) renderView(b); else hide('view'); } }
+    if (typeof maybeRefreshDiscover === 'function') maybeRefreshDiscover(); // «Da scoprire»: una volta a settimana per tutta la famiglia
   } catch (e) {
     console.warn('[Libreria] sincronizzazione', e);
     setCloudStatus('error', 'Sincronizzazione non riuscita: riprovo tra poco.');
@@ -245,10 +246,19 @@ async function syncSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     if (!$('year').hidden) renderYear();
   }
+  // «Da scoprire»: le proposte della settimana valgono per tutti i telefoni; vince la più recente.
+  const rDisc = remote.discover && typeof remote.discover === 'object' ? remote.discover : null;
+  const lDisc = loadDiscover();
+  let discover = lDisc && (!rDisc || (lDisc.updatedAt || 0) > (rDisc.updatedAt || 0)) ? lDisc : rDisc;
+  if (rDisc && discover === rDisc && (!lDisc || (rDisc.updatedAt || 0) > (lDisc.updatedAt || 0))) {
+    try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(rDisc)); } catch (e) { /* niente */ }
+    if (viewMode === 'wish') renderList();
+  }
+  const discPush = Boolean(discover && discover !== rDisc);
   const remoteSig = JSON.stringify(SETTINGS_KEYS.reduce((o, k) => ((o[k] = remote[k] || []), o), {}));
-  if (!hasRemote || mergedSig !== remoteSig || key !== remoteKey || goalsSig !== sortedSig(rGoals)) {
+  if (!hasRemote || mergedSig !== remoteSig || key !== remoteKey || goalsSig !== sortedSig(rGoals) || discPush) {
     const at = Date.now();
-    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: { ...merged, googleKey: key, goals }, settings_at: at }).eq('id', cloud.lib);
+    const { error: e2 } = await sb.from('libreria_libraries').update({ settings: { ...merged, googleKey: key, goals, ...(discover ? { discover } : {}) }, settings_at: at }).eq('id', cloud.lib);
     if (e2) throw e2;
     cloud.settingsAt = at;
   } else {

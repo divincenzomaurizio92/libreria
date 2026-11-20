@@ -871,3 +871,5 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .pick-list { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, .55); display: grid; place-items: end center; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 .pick-list-card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .pick-list-card p { margin: 0 0 6px; font-weight: 600; }
+.disc-wait { margin: 4px 0 12px; }
+.disc-empty .claude-ask { display: inline-flex; margin-top: 10px; }

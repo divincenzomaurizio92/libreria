@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 62; // va tenuto uguale al numero in version.json
+const APP_VERSION = 63; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -880,6 +880,52 @@ let discoverItems = [];
 function loadDiscover() {
   try { const d = JSON.parse(localStorage.getItem(DISCOVER_KEY) || 'null'); return d && typeof d === 'object' ? d : null; } catch (e) { return null; }
 }
+/* Una volta a settimana (per tutta la famiglia, la prima apertura dopo 7 giorni su qualsiasi telefono) il Bibliotecario
+   prepara le proposte; il risultato passa agli altri telefoni con la libreria online. */
+let discoverBusy = false;
+async function maybeRefreshDiscover(force) {
+  if (discoverBusy || typeof askClaude !== 'function' || !cloudReady() || !navigator.onLine) return;
+  const d = loadDiscover();
+  if (!force && d && Date.now() - (d.updatedAt || 0) < 7 * 864e5) return;
+  // Dopo un errore si riprova al massimo una volta ogni 6 ore.
+  const tried = Number(localStorage.getItem('libreria.discover.tried') || 0);
+  if (!force && Date.now() - tried < 6 * 3600e3) return;
+  localStorage.setItem('libreria.discover.tried', String(Date.now()));
+  discoverBusy = true;
+  if (viewMode === 'wish') renderList();
+  const owned = state.books;
+  const loved = owned.filter((b) => Number(b.rating) >= 4).sort((a, b) => b.rating - a.rating || (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 30);
+  const count = (arr) => { const c = {}; arr.forEach((x) => { if (x) c[x] = (c[x] || 0) + 1; }); return Object.entries(c).sort((a, b) => b[1] - a[1]).map((x) => x[0]); };
+  const r = await askClaude({
+    azione: 'scopri',
+    preferiti: loved.map((b) => ({ titolo: b.title, autore: firstAuthor(b.authors), voto: b.rating })),
+    generi: count(owned.flatMap((b) => b.genres || [])).slice(0, 10),
+    temi: count(owned.map((b) => b.theme)).slice(0, 10),
+    avete: owned.map((b) => b.title).filter(Boolean),
+  });
+  discoverBusy = false;
+  if (!r || !r.ok) { if (viewMode === 'wish') renderList(); return; }
+  const conv = (x) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason: x.motivo || '' });
+  const out = { updatedAt: Date.now(), bestsellers: (r.bestseller || []).map(conv), similar: (r.simili || []).map(conv) };
+  const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
+  save();
+  if (viewMode === 'wish') renderList();
+  // Copertine (e ISBN mancanti) dai cataloghi, poi si salva di nuovo e si manda agli altri telefoni.
+  for (const it of [...out.bestsellers, ...out.similar]) {
+    try {
+      if (!it.isbn) {
+        const t = norm(it.title);
+        const hit = (await searchByText([it.title, it.authors].join(' '))).find((x) => norm(x.title).startsWith(t) || t.startsWith(norm(x.title)));
+        if (hit) { it.isbn = hit.isbn || ''; it.cover = hit.cover || ''; }
+      }
+      if (!it.cover && it.isbn) it.cover = await probeCover(it.isbn);
+    } catch (e) { /* senza copertina: resta il segnaposto */ }
+  }
+  out.updatedAt = Date.now();
+  save();
+  if (viewMode === 'wish') renderList();
+  if (typeof scheduleSync === 'function') scheduleSync(500);
+}
 const normTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9à-ù]+/g, ' ').trim();
 function haveIt(item) {
   return state.books.find((b) => (item.isbn && b.isbn === item.isbn) || (normTitle(b.title) && normTitle(b.title) === normTitle(item.title)));
@@ -1090,14 +1136,16 @@ function discoverHtml() {
     }).join('');
     return `<p class="disc-sub">${title}</p><div class="rail">${cells}</div>`;
   };
-  const body = d ? rail('I più venduti in Italia', d.bestsellers) + rail('Simili ai vostri', d.similar) : '';
+  const body = d ? rail('I più venduti in Italia', d.bestsellers) + rail('Simili ai vostri preferiti', d.similar) : '';
   const when = d && d.updatedAt ? ' · aggiornato il ' + new Date(d.updatedAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }) : '';
   return `<section class="rail-sec discover">
     <h3 class="rail-label">Da scoprire<small>${esc(when)}</small></h3>
-    ${body || `<div class="disc-empty">
+    ${discoverBusy ? '<p class="hint claude-wait disc-wait">✨ Il Bibliotecario sta scegliendo i libri della settimana…</p>' : ''}
+    ${body || (discoverBusy ? '' : `<div class="disc-empty">
       <div class="disc-ghosts" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-      <p><strong>Presto, ogni settimana</strong>I libri più venduti in Italia e quelli simili ai vostri, scelti dal Bibliotecario a partire dai libri che avete votato bene e dai vostri temi. Con un tocco finiscono nei desideri.</p>
-    </div>`}
+      <p><strong>Ogni settimana, da solo</strong>I libri più venduti in Italia e quelli simili ai vostri preferiti, scelti dal Bibliotecario a partire dai libri che avete votato bene e dai vostri temi.
+      ${typeof cloudReady === 'function' && cloudReady() ? '<button class="chip claude-ask" data-disc-now>✨ Prepara adesso</button>' : 'Serve la libreria online (Impostazioni).'}</p>
+    </div>`)}
   </section>`;
 }
 function openDiscover(i) {
@@ -2950,7 +2998,10 @@ function init() {
     else if (ratio < 0.8) { pinch.done = true; setZoom(gridZoom + 1); }
   }, { passive: true });
   $('list').addEventListener('touchend', () => { pinch = null; }, { passive: true });
-  $('list').addEventListener('click', (e) => { const d = e.target.closest('[data-disc]'); if (d) openDiscover(Number(d.dataset.disc)); });
+  $('list').addEventListener('click', (e) => {
+    const d = e.target.closest('[data-disc]'); if (d) { openDiscover(Number(d.dataset.disc)); return; }
+    if (e.target.closest('[data-disc-now]')) maybeRefreshDiscover(true);
+  });
   $('list').addEventListener('click', (e) => {
     const m = e.target.closest('[data-more-wish]'); if (m) { e.stopPropagation(); addAuthorMoreToWish(m.dataset.moreWish); return; }
     const c = e.target.closest('[data-claude-author]'); if (c) { e.stopPropagation(); askClaudeAuthor(c.dataset.claudeAuthor); return; }

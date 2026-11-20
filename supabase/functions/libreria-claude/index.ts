@@ -3,6 +3,8 @@
 // la chiave di Claude resta qui, tra i segreti di Supabase, e non passa mai dai telefoni.
 // Chiave: LIBRERIA_ANTHROPIC_KEY se c'è (per tenere i costi separati), altrimenti ANTHROPIC_API_KEY già usata dall'HUB.
 //  · {azione: "autore", nome, lingua, vostri: [{titolo, numero}]} → { ok, libri: [{titolo, saga, numero, anno, editore, isbn, prezzo, nota}], costo }
+//  · {azione: "scopri", preferiti: [{titolo, autore, voto}], generi: [..], temi: [..], avete: [titoli]}
+//      → { ok, bestseller: [{titolo, autore, isbn, editore, motivo}], simili: [...], costo }   (sezione «Da scoprire», una volta a settimana)
 const SB = Deno.env.get("SUPABASE_URL")!;
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const out = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -77,6 +79,32 @@ async function autore(b: any) {
   return { ok: true, libri, costo: r.costo };
 }
 
+async function scopri(b: any) {
+  const pref = (Array.isArray(b.preferiti) ? b.preferiti : []).slice(0, 30).map((x: any) => `- «${s(x.titolo, 100)}» di ${s(x.autore, 60)}${x.voto ? " (" + Number(x.voto) + "★)" : ""}`).join("\n");
+  const gen = (Array.isArray(b.generi) ? b.generi : []).slice(0, 12).map((x: any) => s(x, 40)).join(", ");
+  const temi = (Array.isArray(b.temi) ? b.temi : []).slice(0, 12).map((x: any) => s(x, 40)).join(", ");
+  const avete = (Array.isArray(b.avete) ? b.avete : []).slice(0, 250).map((x: any) => s(x, 60)).join("; ");
+  const oggi = new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+  const prompt = `Sei il bibliotecario di una famiglia italiana. Oggi è ${oggi}.\n`
+    + `1) Cerca la classifica dei libri più venduti in Italia di questa settimana (per esempio quella di IBS, Feltrinelli o della stampa) e scegli i 10 titoli più venduti, mescolando narrativa e saggistica.\n`
+    + `2) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
+    + (gen ? `Generi che leggono: ${gen}.\n` : "") + (temi ? `Temi che amano: ${temi}.\n` : "")
+    + `Non proporre libri che hanno già: ${avete || "(nessuno)"}.\n`
+    + `Sii rapido: una o due ricerche bastano (la classifica della settimana); i libri simili scegli tu, senza cercarli uno per uno.\n`
+    + `Non inventare: solo libri che esistono in italiano; se non sei sicuro dell'ISBN metti null.\n`
+    + `Rispondi SOLO con il JSON: {"bestseller": [{"titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null, "motivo": brevissimo, es. "n. 1 in classifica"}],`
+    + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "motivo": brevissimo, es. "perché vi è piaciuto «Io uccido»"}]}`;
+  const r = await chiedi(prompt, 2);
+  if (r.err) return { ok: false, error: r.err };
+  const j = jsonDa(r.testo);
+  if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
+  const pulisci = (L: any) => (Array.isArray(L) ? L : []).slice(0, 12).filter((x: any) => x && x.titolo).map((x: any) => ({
+    titolo: s(x.titolo), autore: s(x.autore, 100), editore: x.editore ? s(x.editore, 60) : null,
+    isbn: /^97[89]\d{10}$/.test(String(x.isbn || "").replace(/-/g, "")) ? String(x.isbn).replace(/-/g, "") : null, motivo: x.motivo ? s(x.motivo, 90) : null,
+  }));
+  return { ok: true, bestseller: pulisci(j.bestseller), simili: pulisci(j.simili), costo: r.costo };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return out({ ok: false, error: "solo POST" }, 405);
@@ -84,6 +112,7 @@ Deno.serve(async (req) => {
     if (!(await membro(req.headers.get("Authorization") || ""))) return out({ ok: false, error: "accesso non valido" }, 401);
     const b = await req.json().catch(() => ({}));
     if (b.azione === "autore") return out(await autore(b));
+    if (b.azione === "scopri") return out(await scopri(b));
     return out({ ok: false, error: "azione sconosciuta" }, 400);
   } catch (e) { return out({ ok: false, error: String((e as Error).message || e).slice(0, 300) }, 500); }
 });

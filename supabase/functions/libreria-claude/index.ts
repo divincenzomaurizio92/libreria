@@ -3,18 +3,25 @@
 // la chiave di Claude resta qui, tra i segreti di Supabase, e non passa mai dai telefoni.
 // Chiave: LIBRERIA_ANTHROPIC_KEY se c'è (per tenere i costi separati), altrimenti ANTHROPIC_API_KEY già usata dall'HUB.
 //  · {azione: "autore", nome, lingua, vostri: [{titolo, numero}]} → { ok, libri: [{titolo, saga, numero, anno, editore, isbn, prezzo, nota}], riassunto, costo }
-const SB = Deno.env.get("SUPABASE_URL")!, SK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SB = Deno.env.get("SUPABASE_URL")!;
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const out = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const MODELLO = "claude-sonnet-5-5";
 const PREZZO: [number, number] = [2, 10]; // dollari per milione di token (entrata, uscita), come nell'HUB
 
+// Chi chiama: il gateway di Supabase ha già controllato il token (verify_jwt), qui se ne legge l'utente
+// e si guarda che sia nella libreria, con il token stesso dell'utente (le regole del database fanno il resto).
 async function membro(auth: string): Promise<boolean> {
-  const u = await fetch(`${SB}/auth/v1/user`, { headers: { apikey: SK, Authorization: auth } });
-  if (!u.ok) return false;
-  const uid = (await u.json()).id;
-  const r = await fetch(`${SB}/rest/v1/libreria_members?select=library_id&user_id=eq.${uid}&limit=1`, { headers: { apikey: SK, Authorization: `Bearer ${SK}` } });
-  return r.ok && (await r.json()).length > 0;
+  const tok = auth.replace(/^Bearer\s+/i, "");
+  let uid = "";
+  try { const p = tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); uid = JSON.parse(atob(p + "===".slice((p.length + 3) % 4))).sub || ""; } catch { return false; }
+  if (!/^[0-9a-f-]{36}$/.test(uid)) return false;
+  const anon = "sb_publishable_y_GGmVv2RD7z83XXgGStDw_0HfaoloX"; // chiave pubblica della libreria (è già nell'app)
+  const r = await fetch(`${SB}/rest/v1/libreria_members?select=library_id&user_id=eq.${uid}&limit=1`, { headers: { apikey: anon, Authorization: `Bearer ${tok}` } });
+  if (!r.ok) { console.log(JSON.stringify({ membro: "errore", status: r.status, testo: (await r.text()).slice(0, 200) })); return false; }
+  const rows = await r.json();
+  if (!rows.length) console.log(JSON.stringify({ membro: "non trovato", uid }));
+  return rows.length > 0;
 }
 
 // Una domanda a Claude con la ricerca sul web; «pause_turn» = Claude non ha finito di cercare, si continua.

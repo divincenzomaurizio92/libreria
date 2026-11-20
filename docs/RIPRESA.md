@@ -113,13 +113,10 @@ mancanti nella vostra lingua; risposta tenuta sul telefono 30 giorni). Modello S
 
 1. **Collaudo su iPhone** (Elena, dall'icona installata da Safari). Punti a rischio: scansione con ZXing,
    gesti (tocco prolungato, pizzico, scorrimento), prima sincronizzazione vera. Su iPhone non c'è vibrazione.
-2. **Funzioni con Claude** (crediti API inclusi nel piano Max: 100 $ al mese).
-   - Prima: Maurizio collega un'organizzazione della Claude Console da claude.ai *Impostazioni → Fatturazione →
-     API credits* e crea una chiave. **La chiave non va mai in chat né nel codice**: si salva tra i segreti di
-     Supabase (DR HUB). Da chiarire se l'Hub ha già una chiave Anthropic salvata (ha funzioni "vision").
-   - Poi, con una funzione su Supabase: copertine fisse nel proprio archivio (con il colore vero), genere e tema
-     proposti dalla trama (anche in blocco), prezzi di copertina, riconoscimento dalla foto della copertina
-     (risolve edicola e libri senza ISBN), "Da scoprire" settimanale (più venduti in Italia + simili ai vostri).
+2. **Altre funzioni del Bibliotecario** (Claude è già collegato: funzione `libreria-claude`, chiave dell'HUB):
+   genere e tema proposti dalla trama (anche in blocco), prezzi di copertina, riconoscimento dalla foto della
+   copertina (edicola e libri senza ISBN), copertine fisse nel proprio archivio.
+3. **Da discutere:** «parte 3» e citazioni (rimandati da Maurizio il 20/11).
 4. **Ritaglio delle foto di copertina** (riquadro guida, niente tavolo attorno).
 5. **Libreria nuova a parete:** misure dei vani, "oggetti" nel catalogo (set Pokémon, pianta, quadretto),
    disposizione vano per vano nello scaffale digitale e PDF stampabile con caselle da spuntare.

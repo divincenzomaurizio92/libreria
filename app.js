@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 67; // va tenuto uguale al numero in version.json
+const APP_VERSION = 68; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -931,23 +931,32 @@ async function maybeRefreshDiscover(force) {
     temi: count(owned.map((b) => b.theme)).slice(0, 10),
     avete: owned.map((b) => b.title).filter(Boolean),
   });
-  discoverBusy = false;
-  if (!r || !r.ok) { if (viewMode === 'wish') renderList(); return; }
-  // Frasi sempre uguali: «3° in classifica» per i più venduti, «Perché vi è piaciuto «…»» per i simili.
-  const conv = (x, reason) => ({ title: x.titolo, authors: x.autore || '', isbn: x.isbn || '', publisher: x.editore || '', cover: '', reason, stars: Number(x.voto) || 0 });
+  if (!r || !r.ok) { discoverBusy = false; if (viewMode === 'wish') renderList(); return; }
+  // Le copertine già trovate le volte prima si tengono (stesso titolo): non spariscono a ogni aggiornamento.
+  const known = {};
+  for (const it of [...((d && d.bestsellers) || []), ...((d && d.amazon) || []), ...((d && d.similar) || [])]) if (it.cover) known[normTitle(it.title)] = it;
+  const amazonImg = (u) => (/^https:\/\/(m\.media-amazon\.com|images-[a-z]+\.ssl-images-amazon\.com)\//.test(String(u || '')) ? u : '');
+  // Frasi sempre uguali: «3° in classifica» per i più venduti, «Simile a «…»» per i simili.
+  const conv = (x, reason) => {
+    const old = known[normTitle(x.titolo)];
+    return { title: x.titolo, authors: x.autore || '', isbn: x.isbn || (old && old.isbn) || '', publisher: x.editore || '', cover: (old && old.cover) || amazonImg(x.copertina), reason, stars: Number(x.voto) || (old && old.stars) || 0 };
+  };
   const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
   const out = { updatedAt: Date.now(), source: [r.fonte, r.settimana].filter(Boolean).join(' · '),
     bestsellers: best.map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° in classifica'), rank: x.posizione || i + 1 })),
     amazon: (r.amazon || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99)).map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° su Amazon'), rank: x.posizione || i + 1 })),
     similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Simile a «' + x.simile_a + '»' : '')) };
+  // Se una classifica questa volta non si trova (o arriva a metà), resta quella di prima invece di sparire.
+  if (d && out.bestsellers.length < 5 && (d.bestsellers || []).length >= out.bestsellers.length) { out.bestsellers = d.bestsellers; out.source = d.source || ''; }
+  if (d && out.amazon.length < 5 && (d.amazon || []).length >= out.amazon.length) out.amazon = d.amazon;
   const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
-  save();
-  if (viewMode === 'wish') renderList();
-  // Copertine (e ISBN mancanti) dai cataloghi, poi si salva di nuovo e si manda agli altri telefoni.
+  // Copertine (e ISBN mancanti) dai cataloghi prima di mostrare le proposte nuove: niente copertine che vanno e vengono.
   await Promise.all([...out.bestsellers, ...out.amazon, ...out.similar].map(async (it) => {
+    if (it.cover) return;
     try { const f = await findCover(it.title, it.authors, it.isbn); it.cover = f.cover; it.isbn = f.isbn; if (!it.stars && f.stars) it.stars = f.stars; } catch (e) { /* resta il segnaposto */ }
   }));
   out.updatedAt = Date.now();
+  discoverBusy = false;
   save();
   if (viewMode === 'wish') renderList();
   if (typeof scheduleSync === 'function') scheduleSync(500);

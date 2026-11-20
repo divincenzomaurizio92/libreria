@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 69; // va tenuto uguale al numero in version.json
+const APP_VERSION = 70; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -945,11 +945,10 @@ async function maybeRefreshDiscover(force) {
   const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
   const out = { updatedAt: Date.now(), source: [r.fonte, r.settimana].filter(Boolean).join(' · '),
     bestsellers: best.map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° in classifica'), rank: x.posizione || i + 1 })),
-    amazon: (r.amazon || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99)).map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° su Amazon'), rank: x.posizione || i + 1 })),
+    amazon: [], // una classifica sola (Feltrinelli); per ogni libro, nella scheda, i link a tutti i negozi
     similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Simile a «' + x.simile_a + '»' : '')) };
   // Se una classifica questa volta non si trova (o arriva a metà), resta quella di prima invece di sparire.
   if (d && out.bestsellers.length < 5 && (d.bestsellers || []).length >= out.bestsellers.length) { out.bestsellers = d.bestsellers; out.source = d.source || ''; }
-  if (d && out.amazon.length < 5 && (d.amazon || []).length >= out.amazon.length) out.amazon = d.amazon;
   const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
   // Copertine (e ISBN mancanti) dai cataloghi prima di mostrare le proposte nuove: niente copertine che vanno e vengono.
   await Promise.all([...out.bestsellers, ...out.amazon, ...out.similar].map(async (it) => {
@@ -1252,7 +1251,6 @@ function discoverHtml() {
   const chart = (title, src, items) => (items && items.length
     ? `<p class="disc-sub">${title}</p>${src ? `<p class="disc-src">${esc(src)}</p>` : ''}${suggShelves(items.slice(0, 10), null, (it, k) => it.rank || k + 1)}` : '');
   const body = d ? chart('I più venduti in Italia', d.source, d.bestsellers)
-    + chart('I più venduti su Amazon', d.amazonSource || 'Bestseller Amazon.it · Libri', d.amazon)
     + (d.similar && d.similar.length ? `<p class="disc-sub">Simili ai vostri preferiti</p>${suggShelves(d.similar.slice(0, 12), (it) => it.reason)}` : '') : '';
   const canAsk = typeof cloudReady === 'function' && cloudReady();
   return `<section class="rail-sec discover">

@@ -124,18 +124,17 @@ async function scopri(b: any) {
     + `   pubblicata da L'Espresso; se manca anche quella, la classifica dei più venduti di Mondadori Store (mondadoristore.it). Scrivi in "fonte" quale hai usato.\n`
     + `   Servono TUTTI E 10 i titoli: se una pagina ne mostra meno, aprila intera con web_fetch.\n`
     )
-    + `2) Cerca i «Bestseller in Libri» di Amazon.it (la classifica dei più venduti su Amazon Italia) e riporta i primi 10 nell'ordine mostrato (apri la pagina con web_fetch se serve, tutti e 10 i titoli).\n`
-    + `3) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
+    + `2) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
     + (gen ? `Generi che leggono: ${gen}.\n` : "") + (temi ? `Temi che amano: ${temi}.\n` : "")
     + `Non proporre libri che hanno già: ${avete || "(nessuno)"}.\n`
-    + `Sii rapido: una ricerca per ciascuna classifica basta; i libri simili scegli tu, senza cercarli uno per uno.\n`
+    + `Sii rapido: i libri simili scegli tu, senza cercarli uno per uno.\n`
     + `Non inventare: solo libri che esistono in italiano; se non sei sicuro dell'ISBN metti null.\n`
     + `Per ogni libro simile indica in "simile_a" il titolo ESATTO di uno dei loro libri amati qui sopra a cui somiglia di più.\n`
     + `Rispondi SOLO con il JSON: {"fonte": "Classifica Feltrinelli" (o quella usata), "settimana": periodo delle vendite se scritto, es. "dal 9 al 15 novembre", altrimenti null, "bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null, "voto": media delle stelle dei lettori da 1 a 5 (es. 4.6) se la vedi su Amazon o Goodreads, altrimenti null,`
     + ` "copertina": indirizzo dell'immagine di copertina se lo vedi nella pagina aperta (per Amazon quelli che iniziano con https://m.media-amazon.com/images/), altrimenti null}],`
-    + ` "amazon": [stessi campi di bestseller, con la posizione su Amazon e il voto medio mostrato da Amazon],`
     + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "simile_a": titolo di un loro libro amato}]}`;
-  const r = await chiedi(prompt, conFelt ? 2 : 4, 3);
+  // Con la classifica già pronta servono al massimo una ricerca e nessuna pagina: molto più rapido.
+  const r = await chiedi(prompt, conFelt ? 1 : 3, conFelt ? 0 : 3);
   if (r.err) return { ok: false, error: r.err };
   const j = jsonDa(r.testo);
   if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
@@ -146,8 +145,8 @@ async function scopri(b: any) {
     voto: Number(x.voto) >= 1 && Number(x.voto) <= 5 ? Math.round(Number(x.voto) * 10) / 10 : null,
     copertina: /^https:\/\/(m\.media-amazon\.com|images-[a-z]+\.ssl-images-amazon\.com)\/images\/[^\s"']+$/.test(String(x.copertina || "")) ? String(x.copertina) : null,
   }));
-  if (conFelt) return { ok: true, fonte: "Classifica Feltrinelli · i più venduti di oggi", settimana: null, bestseller: felt, amazon: pulisci(j.amazon), simili: pulisci(j.simili), costo: r.costo };
-  return { ok: true, fonte: j.fonte ? s(j.fonte, 60) : null, settimana: j.settimana ? s(j.settimana, 60) : null, bestseller: pulisci(j.bestseller), amazon: pulisci(j.amazon), simili: pulisci(j.simili), costo: r.costo };
+  if (conFelt) return { ok: true, fonte: "Classifica Feltrinelli · i più venduti di oggi", settimana: null, bestseller: felt, amazon: [], simili: pulisci(j.simili), costo: r.costo };
+  return { ok: true, fonte: j.fonte ? s(j.fonte, 60) : null, settimana: j.settimana ? s(j.settimana, 60) : null, bestseller: pulisci(j.bestseller), amazon: [], simili: pulisci(j.simili), costo: r.costo };
 }
 
 Deno.serve(async (req) => {

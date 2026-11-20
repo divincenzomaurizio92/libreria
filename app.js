@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 65; // va tenuto uguale al numero in version.json
+const APP_VERSION = 66; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -353,6 +353,7 @@ function storeLinks(book) {
   if (!q) return [];
   return [
     ['Amazon', 'https://www.amazon.it/s?i=stripbooks&k=' + q],
+    ['IBS', 'https://www.ibs.it/search/?ts=as&query=' + q],
     ['Feltrinelli', 'https://www.lafeltrinelli.it/search/?ts=as&query=' + q],
     ['Mondadori', 'https://www.mondadoristore.it/search?query=' + q],
   ];
@@ -933,12 +934,13 @@ async function maybeRefreshDiscover(force) {
   const best = (r.bestseller || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99));
   const out = { updatedAt: Date.now(), source: [r.fonte, r.settimana].filter(Boolean).join(' · '),
     bestsellers: best.map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° in classifica'), rank: x.posizione || i + 1 })),
+    amazon: (r.amazon || []).slice().sort((a, b) => (a.posizione || 99) - (b.posizione || 99)).map((x, i) => ({ ...conv(x, (x.posizione || i + 1) + '° su Amazon'), rank: x.posizione || i + 1 })),
     similar: (r.simili || []).map((x) => conv(x, x.simile_a ? 'Perché vi è piaciuto «' + x.simile_a + '»' : '')) };
   const save = () => { try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(out)); } catch (e) { /* niente */ } };
   save();
   if (viewMode === 'wish') renderList();
   // Copertine (e ISBN mancanti) dai cataloghi, poi si salva di nuovo e si manda agli altri telefoni.
-  await Promise.all([...out.bestsellers, ...out.similar].map(async (it) => {
+  await Promise.all([...out.bestsellers, ...out.amazon, ...out.similar].map(async (it) => {
     try { const f = await findCover(it.title, it.authors, it.isbn); it.cover = f.cover; it.isbn = f.isbn; } catch (e) { /* resta il segnaposto */ }
   }));
   out.updatedAt = Date.now();
@@ -998,6 +1000,16 @@ async function askClaudeAuthor(name) {
 }
 /* Il «Bibliotecario» è Claude: cerca per voi negli scaffali del web i libri dell'autore che vi mancano. */
 let claudeSort = 'new'; // 'new' = dal più recente, 'old' = dal più vecchio
+// Un libro proposto dal Bibliotecario nella forma comune delle proposte (la cache sul telefono tiene anche copertina e trama).
+function claudeItem(x, name) {
+  if (!x._it) {
+    const num = x.numero && !String(x.titolo).includes(String(x.numero)) ? x.numero : 0;
+    x._it = { title: x.titolo + (num ? ' n. ' + num : ''), authors: name, isbn: x.isbn || '', publisher: x.editore || '', year: x.anno || '', price: x.prezzo || '',
+      cover: x.cover || '', reason: x.nota || '', series: x.saga || '', seriesNum: x.numero || '' };
+  }
+  if (x.cover && !x._it.cover) x._it.cover = x.cover;
+  return x._it;
+}
 function claudeAuthorHtml(name) {
   const st = claudeAuthorState(name);
   const btn = (label) => `<button class="chip claude-ask" data-claude-author="${esc(name)}">✨ ${label}</button>`;
@@ -1016,11 +1028,7 @@ function claudeAuthorHtml(name) {
   return `<section class="claude-box">${haveBox}
     <div class="claude-head"><h3 class="shelf-label">✨ Il Bibliotecario propone · ${libri.length}</h3>
       ${libri.length > 1 ? `<div class="seg claude-sort"><button data-claude-sort="new" class="${claudeSort === 'new' ? 'on' : ''}">Più recenti</button><button data-claude-sort="old" class="${claudeSort === 'old' ? 'on' : ''}">Più vecchi</button></div>` : ''}</div>
-    ${libri.map((x) => `<div class="book more-book">${coverHtml({ title: x.titolo, authors: name, cover: x.cover || '' })}
-      <span class="book-info"><span class="book-title">«${esc(x.titolo)}»${x.numero && !String(x.titolo).includes(String(x.numero)) ? ' n. ' + x.numero : ''}</span>
-      <span class="book-author">${esc([x.saga && x.saga !== x.titolo ? x.saga + (x.numero ? ' n. ' + x.numero : '') : '', x.anno, x.editore, x.prezzo ? euro(x.prezzo) : ''].filter(Boolean).join(' · '))}</span>
-      ${x.nota ? `<span class="book-author claude-note">${esc(x.nota)}</span>` : ''}
-      <span class="more-actions"><button class="chip" data-claude-wish="${esc(name)}|${st.libri.indexOf(x)}">＋ Desideri</button>${storeLinks({ title: x.titolo + (x.numero && !String(x.titolo).includes(String(x.numero)) ? ' ' + x.numero : ''), authors: name }).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('') || '<p class="hint">Il Bibliotecario non ha trovato altri suoi libri che vi mancano.</p>'}
+    ${libri.length ? suggShelves(libri.map((x) => claudeItem(x, name)), (it) => [it.seriesNum ? 'n. ' + it.seriesNum : '', it.year].filter(Boolean).join(' · ')) : '<p class="hint">Il Bibliotecario non ha trovato altri suoi libri che vi mancano.</p>'}
     <p class="hint claude-foot">Ricerca di ${days ? days === 1 ? 'ieri' : days + ' giorni fa' : 'oggi'}. Il Bibliotecario può sbagliare: controlla prima di comprare. ${btn('Cerca di nuovo')}</p>
   </section>`;
 }
@@ -1074,17 +1082,17 @@ function authorMoreHtml(name) {
   const owned = (x) => state.books.some((b) => x.isbn && b.isbn === x.isbn) || mineKeys.has(x.vol.base + '|' + x.vol.num);
   const items = st.items.filter((x) => !owned(x));
   if (!items.length) return st.failed ? `<section class="author-more">${head}<p class="hint">Non riesco a raggiungere i cataloghi: riprova più tardi.</p></section>` : '';
-  const row = (x) => `<div class="book more-book">${coverHtml(x)}
-      <span class="book-info"><span class="book-title">${esc(x.title)}${x.vol.num && !x.title.includes(String(x.vol.num)) ? ' · n. ' + x.vol.num : ''}</span><span class="book-author">${esc([x.year, x.publisher].filter(Boolean).join(' · '))}</span>
-      <span class="more-actions"><button class="chip" data-more-wish="${esc(name)}|${st.items.indexOf(x)}">＋ Desideri</button>${storeLinks(x).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`;
+  // Sui cataloghi la trama c'è già: la scheda la mostra subito.
+  const asItem = (x) => { x.plot = x.plot || x.description || ''; x.plotTried = true; if (!x._num && x.vol.num && !String(x.title).includes(String(x.vol.num))) { x.title = x.title + ' n. ' + x.vol.num; } x._num = true; return x; };
+  const shelf = (L) => suggShelves(L.map(asItem), (it) => it.year);
   const same = items.filter((x) => x.sameLang), other = items.filter((x) => !x.sameLang);
   const langName = LANG_NAMES[st.lang] || 'la vostra lingua';
   const cl = claudeAuthorState(name);
-  if (cl && cl.libri) return `<details class="author-more more-other"><summary>Dai cataloghi (Google Books) · ${items.length}</summary>${same.concat(other).map(row).join('')}</details>`;
+  if (cl && cl.libri) return `<details class="author-more more-other"><summary>Dai cataloghi (Google Books) · ${items.length}</summary>${shelf(same.concat(other))}</details>`;
   return `<section class="author-more">${head.replace('</h3>', ' · ' + items.length + '</h3>')}
     <p class="hint">Dai cataloghi, quelli che non avete: prima in ${langName}, in ordine di uscita e di volume.</p>
-    ${same.map(row).join('') || `<p class="hint">Nessun altro suo libro in ${langName} nei cataloghi.</p>`}
-    ${other.length ? `<details class="more-other"><summary>In altre lingue · ${other.length}</summary>${other.map(row).join('')}</details>` : ''}
+    ${same.length ? shelf(same) : `<p class="hint">Nessun altro suo libro in ${langName} nei cataloghi.</p>`}
+    ${other.length ? `<details class="more-other"><summary>In altre lingue · ${other.length}</summary>${shelf(other)}</details>` : ''}
   </section>`;
 }
 async function loadAuthorMore(name) {
@@ -1136,37 +1144,101 @@ function addAuthorMoreToWish(key) {
   });
 }
 
+/* ================= PROPOSTE: mensole e scheda =================
+   Tutti i libri suggeriti (classifiche, simili, pagina autore, cataloghi) stanno su mensole come la libreria.
+   Toccandone uno si apre una scheda con le informazioni, «＋ Aggiungi ai desideri» e dove comprarlo. */
+let suggItems = []; // si riempie a ogni disegno della lista
+function suggCell(it, opts = {}) {
+  const i = suggItems.push(it) - 1;
+  const own = haveIt(it);
+  const color = SPINE_COLORS[hashOf(it.title || '') % SPINE_COLORS.length];
+  const inner = it.cover
+    ? `<img src="${esc(httpsUrl(it.cover))}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${esc((it.title || '?').charAt(0))}" data-ph="${esc(phInner(it))}" data-color="${esc(color)}">`
+    : phInner(it);
+  return `<button class="cell disc" data-sugg="${i}">
+    <span class="cell-cover${it.cover ? '' : ' ph-cover'}" style="background:${color};color:${inkOn(color)}">${inner}${opts.rank ? `<span class="rank-badge">${opts.rank}</span>` : ''}${own ? `<span class="badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
+    ${opts.caption ? `<span class="disc-reason">${esc(opts.caption)}</span>` : ''}
+  </button>`;
+}
+function suggShelves(items, capOf, rankOf) {
+  const cols = gridCols();
+  let rows = '';
+  for (let k = 0; k < items.length; k += cols) {
+    rows += `<div class="shelf-line"><div class="shelf-books" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${items.slice(k, k + cols)
+      .map((it, j) => suggCell(it, { caption: capOf ? capOf(it) : '', rank: rankOf ? rankOf(it, k + j) : 0 })).join('')}</div><div class="plank"></div></div>`;
+  }
+  return `<div class="chart-shelves">${rows}</div>`;
+}
+
+let suggOpen = null;
+function openSugg(i) {
+  const it = suggItems[i];
+  if (!it) return;
+  const own = haveIt(it);
+  if (own) return openView(own);
+  suggOpen = it;
+  renderSugg();
+  show('sugg');
+  if (!it.plotTried) loadSuggInfo(it);
+}
+async function loadSuggInfo(it) {
+  it.plotTried = true;
+  try {
+    let f = null;
+    if (it.isbn) f = (await lookupIsbn(it.isbn)).data;
+    if (!f || !f.description) {
+      const t = norm(it.title.replace(/\s+n\.\s*\d+$/, ''));
+      const hit = (await searchByText([it.title, firstAuthor(it.authors)].join(' '))).find((x) => norm(x.title).startsWith(t) || t.startsWith(norm(x.title)));
+      if (hit) f = { ...hit, ...(f || {}), description: (f && f.description) || hit.description };
+    }
+    if (f) for (const [k, v] of [['plot', f.description], ['pages', f.pages], ['year', f.year], ['publisher', f.publisher], ['cover', f.cover && httpsUrl(f.cover)], ['isbn', f.isbn], ['subjects', f.subjects]]) if (!it[k] && v) it[k] = v;
+  } catch (e) { /* senza trama */ }
+  if (suggOpen === it && !$('sugg').hidden) renderSugg();
+}
+function renderSugg() {
+  const it = suggOpen;
+  const color = SPINE_COLORS[hashOf(it.title || '') % SPINE_COLORS.length];
+  const cover = it.cover ? `<img src="${esc(httpsUrl(it.cover))}" alt="" referrerpolicy="no-referrer">` : phInner(it);
+  const meta = [it.publisher, it.year, it.pages ? it.pages + ' pagine' : '', Number(it.price) ? euro(it.price) : ''].filter(Boolean).join(' · ');
+  const author = firstAuthor(it.authors);
+  $('sugg-card').innerHTML = `
+    <div class="sugg-top">
+      <div class="sugg-cover${it.cover ? '' : ' ph-cover'}" style="background:${color};color:${inkOn(color)}">${cover}</div>
+      <div class="sugg-info">
+        <h3>${esc(it.title)}</h3>
+        ${author ? `<button class="link-btn sugg-author" data-sugg-author="${esc(author)}">${esc(it.authors)} ›</button>` : ''}
+        ${meta ? `<p class="sugg-meta">${esc(meta)}</p>` : ''}
+        ${it.reason ? `<p class="sugg-reason">✨ ${esc(it.reason)}</p>` : ''}
+      </div>
+    </div>
+    <p class="sugg-plot">${it.plot ? esc(it.plot.length > 600 ? it.plot.slice(0, 600).replace(/\s+\S*$/, '') + '…' : it.plot) : it.plotTried ? '' : '<span class="claude-wait">Cerco la trama…</span>'}</p>
+    <button class="btn primary wide" data-sugg-wish>＋ Aggiungi ai desideri</button>
+    <h4 class="sugg-h">Dove comprarlo</h4>
+    <div class="sugg-stores">${storeLinks(it).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</div>
+    <button class="btn ghost wide" data-sugg-close>Chiudi</button>`;
+}
+function addSuggToWish(it) {
+  chooseWishlist(it.title, (list) => {
+    const b = { id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: it.isbn || '', title: it.title, subtitle: it.subtitle || '', authors: it.authors || '', publisher: it.publisher || '',
+      year: it.year || '', pages: it.pages || '', cover: it.cover || '', plot: it.plot || '', plotTried: Boolean(it.plot), lang: it.lang || '',
+      genres: it.subjects ? suggestGenres(it.subjects, it.authors, it.plot).genres.filter((g) => state.genres.includes(g)) : [],
+      owners: [], list, status: '', media: [], price: Number(it.price) ? String(it.price) : '', series: it.series || '', seriesNum: it.seriesNum ? String(it.seriesNum) : '' };
+    state.books.push(b);
+    saveState();
+    hide('sugg');
+    renderList();
+    toast('«' + it.title + '» aggiunto ai desideri: ' + list);
+    if (navigator.onLine && (!b.cover || !b.plot)) batchLookup({ isbn: b.isbn, q: b.isbn ? '' : [b.title, firstAuthor(b.authors)].join(' '), state: 'wait', id: b.id }).then(() => renderList()).catch(() => {});
+  });
+}
+
 function discoverHtml() {
   const d = loadDiscover();
-  discoverItems = [];
-  const cellOf = (it, rank) => {
-      const i = discoverItems.push(it) - 1;
-      const own = haveIt(it);
-      const color = SPINE_COLORS[hashOf(it.title || '') % SPINE_COLORS.length];
-      const inner = it.cover
-        ? `<img src="${esc(httpsUrl(it.cover))}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-        : `<span class="ph-title">${esc(it.title || '')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(it.authors))}</span>`;
-      return `<button class="cell disc" data-disc="${i}">
-        <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${rank ? `<span class="rank-badge">${rank}</span>` : ''}${own ? `<span class="badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
-        <span class="cell-title">${esc(it.title || '')}</span>
-        ${!rank && it.reason ? `<span class="disc-reason">${esc(it.reason)}</span>` : ''}
-      </button>`;
-  };
-  const rail = (title, items) => {
-    if (!items || !items.length) return '';
-    return `<p class="disc-sub">${title}</p><div class="rail">${items.slice(0, 15).map((it) => cellOf(it, 0)).join('')}</div>`;
-  };
-  // La classifica sta su mensole di legno, come la libreria, con il numero della posizione sulla copertina.
-  const chart = (items) => {
-    if (!items || !items.length) return '';
-    const cols = gridCols(), list = items.slice(0, 10);
-    let rows = '';
-    for (let k = 0; k < list.length; k += cols) {
-      rows += `<div class="shelf-line"><div class="shelf-books" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${list.slice(k, k + cols).map((it, j) => cellOf(it, it.rank || k + j + 1)).join('')}</div><div class="plank"></div></div>`;
-    }
-    return `<p class="disc-sub">I più venduti in Italia</p>${d.source ? `<p class="disc-src">${esc(d.source)}</p>` : ''}<div class="chart-shelves">${rows}</div>`;
-  };
-  const body = d ? chart(d.bestsellers) + rail('Simili ai vostri preferiti', d.similar) : '';
+  const chart = (title, src, items) => (items && items.length
+    ? `<p class="disc-sub">${title}</p>${src ? `<p class="disc-src">${esc(src)}</p>` : ''}${suggShelves(items.slice(0, 10), null, (it, k) => it.rank || k + 1)}` : '');
+  const body = d ? chart('I più venduti in Italia', d.source, d.bestsellers)
+    + chart('I più venduti su Amazon', d.amazonSource || 'Bestseller Amazon.it · Libri', d.amazon)
+    + (d.similar && d.similar.length ? `<p class="disc-sub">Simili ai vostri preferiti</p>${suggShelves(d.similar.slice(0, 12), (it) => it.reason)}` : '') : '';
   const canAsk = typeof cloudReady === 'function' && cloudReady();
   return `<section class="rail-sec discover">
     <div class="disc-head"><h3 class="rail-label">Da scoprire</h3>${d && canAsk ? `<button class="chip disc-refresh" data-disc-now ${discoverBusy ? 'disabled' : ''}>
@@ -1291,6 +1363,7 @@ function greeting() {
 }
 
 function renderList() {
+  suggItems = [];
   const q = $('search').value.trim().toLowerCase();
   const sort = $('sort').value;
   const wish = viewMode === 'wish';
@@ -2849,7 +2922,7 @@ function hide(id) { $(id).hidden = true; scheduleBackSync(); }
    Il gesto o il tasto indietro chiude prima ciò che è aperto sopra l'elenco (anteprima, scheda,
    modulo, scanner…), poi l'elenco filtrato da un'etichetta, e solo alla fine esce dall'app.
    Si ottiene tenendo nella cronologia del browser una voce "di guardia" finché qualcosa è aperto. */
-const LAYERS = ['pick', 'review', 'bulk', 'book', 'view', 'import', 'year', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
+const LAYERS = ['sugg', 'pick', 'review', 'bulk', 'book', 'view', 'import', 'year', 'settings', 'manual', 'scanner', 'batch', 'arrange', 'filter-sheet'];
 let backGuard = false;
 let backPending = false;
 let backQueued = false;
@@ -3031,6 +3104,7 @@ function init() {
   $('list').addEventListener('touchend', () => { pinch = null; }, { passive: true });
   $('list').addEventListener('click', (e) => {
     const d = e.target.closest('[data-disc]'); if (d) { openDiscover(Number(d.dataset.disc)); return; }
+    const sg = e.target.closest('[data-sugg]'); if (sg) { e.stopPropagation(); openSugg(Number(sg.dataset.sugg)); return; }
     if (e.target.closest('[data-disc-now]')) maybeRefreshDiscover(true);
   });
   $('list').addEventListener('click', (e) => {
@@ -3644,6 +3718,17 @@ function init() {
   $('import-file').addEventListener('change', (e) => { if (e.target.files[0]) importFile(e.target.files[0]); e.target.value = ''; });
   $('import-paste-go').addEventListener('click', () => { const t = $('import-paste').value.trim(); if (!t) return toast('Incolla prima l\'elenco.'); openImport(parsePasted(t)); });
   $('import-close').addEventListener('click', () => hide('import'));
+  $('sugg').addEventListener('click', (e) => {
+    if (e.target === $('sugg') || e.target.closest('[data-sugg-close]')) { hide('sugg'); return; }
+    if (e.target.closest('[data-sugg-wish]')) { addSuggToWish(suggOpen); return; }
+    const au = e.target.closest('[data-sugg-author]');
+    if (au) {
+      hide('sugg');
+      backTo = { viewMode, filterGenre, filterList };
+      viewMode = 'library'; filterGenre = 'author:' + au.dataset.suggAuthor; $('search').value = '';
+      renderList(); window.scrollTo(0, 0);
+    }
+  });
   $('import-go').addEventListener('click', () => { $('import-paste').value = ''; runImport(); });
   $('import-complete').addEventListener('change', (e) => { importOpts.complete = e.target.checked; });
   $('import-list').addEventListener('change', (e) => { importOpts.list = e.target.value; });

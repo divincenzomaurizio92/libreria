@@ -4,7 +4,7 @@
 // Chiave: LIBRERIA_ANTHROPIC_KEY se c'è (per tenere i costi separati), altrimenti ANTHROPIC_API_KEY già usata dall'HUB.
 //  · {azione: "autore", nome, lingua, vostri: [{titolo, numero}]} → { ok, libri: [{titolo, saga, numero, anno, editore, isbn, prezzo, nota}], costo }
 //  · {azione: "scopri", preferiti: [{titolo, autore, voto}], generi: [..], temi: [..], avete: [titoli]}
-//      → { ok, fonte, settimana, bestseller: [{posizione, titolo, autore, isbn, editore}], simili: [{titolo, autore, isbn, editore, simile_a}], costo }   (sezione «Da scoprire», una volta a settimana)
+//      → { ok, fonte, settimana, bestseller: [{posizione, titolo, autore, isbn, editore}], amazon: [idem], simili: [{titolo, autore, isbn, editore, simile_a}], costo }   (sezione «Da scoprire», una volta a settimana)
 const SB = Deno.env.get("SUPABASE_URL")!;
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const out = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -88,15 +88,17 @@ async function scopri(b: any) {
   const prompt = `Sei il bibliotecario di una famiglia italiana. Oggi è ${oggi}.\n`
     + `1) Cerca la classifica settimanale dei libri più venduti in Italia di «La Lettura» (supplemento del Corriere della Sera), la più recente uscita:\n`
     + `   riporta la sua TOP 10 GENERALE esattamente nell'ordine pubblicato, senza mescolare altre classifiche. Solo se non la trovi usa quella di Tuttolibri (La Stampa) e dillo in "fonte".\n`
-    + `2) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
+    + `2) Cerca i «Bestseller in Libri» di Amazon.it (la classifica dei più venduti su Amazon Italia) e riporta i primi 10 nell'ordine mostrato.\n`
+    + `3) Proponi 10 libri, usciti in italiano, simili a quelli che la famiglia ha amato:\n${pref || "(nessun voto ancora)"}\n`
     + (gen ? `Generi che leggono: ${gen}.\n` : "") + (temi ? `Temi che amano: ${temi}.\n` : "")
     + `Non proporre libri che hanno già: ${avete || "(nessuno)"}.\n`
-    + `Sii rapido: una o due ricerche bastano (la classifica); i libri simili scegli tu, senza cercarli uno per uno.\n`
+    + `Sii rapido: una ricerca per ciascuna classifica basta; i libri simili scegli tu, senza cercarli uno per uno.\n`
     + `Non inventare: solo libri che esistono in italiano; se non sei sicuro dell'ISBN metti null.\n`
     + `Per ogni libro simile indica in "simile_a" il titolo ESATTO di uno dei loro libri amati qui sopra a cui somiglia di più.\n`
     + `Rispondi SOLO con il JSON: {"fonte": "Classifica di La Lettura" (o quella usata), "settimana": periodo delle vendite come scritto, es. "dal 9 al 15 novembre", "bestseller": [{"posizione": 1, 2, 3… in ordine di vendita, "titolo", "autore", "editore" o null, "isbn" (ISBN-13) o null}],`
+    + ` "amazon": [stessi campi di bestseller, con la posizione su Amazon],`
     + ` "simili": [{"titolo", "autore", "editore" o null, "isbn" o null, "simile_a": titolo di un loro libro amato}]}`;
-  const r = await chiedi(prompt, 2);
+  const r = await chiedi(prompt, 3);
   if (r.err) return { ok: false, error: r.err };
   const j = jsonDa(r.testo);
   if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
@@ -105,7 +107,7 @@ async function scopri(b: any) {
     isbn: /^97[89]\d{10}$/.test(String(x.isbn || "").replace(/-/g, "")) ? String(x.isbn).replace(/-/g, "") : null,
     posizione: Number(x.posizione) > 0 && Number(x.posizione) < 100 ? Number(x.posizione) : null, simile_a: x.simile_a ? s(x.simile_a, 100) : null,
   }));
-  return { ok: true, fonte: j.fonte ? s(j.fonte, 60) : null, settimana: j.settimana ? s(j.settimana, 60) : null, bestseller: pulisci(j.bestseller), simili: pulisci(j.simili), costo: r.costo };
+  return { ok: true, fonte: j.fonte ? s(j.fonte, 60) : null, settimana: j.settimana ? s(j.settimana, 60) : null, bestseller: pulisci(j.bestseller), amazon: pulisci(j.amazon), simili: pulisci(j.simili), costo: r.costo };
 }
 
 Deno.serve(async (req) => {

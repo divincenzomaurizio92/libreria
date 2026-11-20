@@ -60,12 +60,12 @@ async function askClaude(body) {
   try {
     const { data, error } = await sb.functions.invoke('libreria-claude', { body });
     if (error) {
-      let msg = error.message || 'Claude non risponde';
+      let msg = error.message || 'nessuna risposta';
       try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* niente */ }
       return { ok: false, error: msg };
     }
     return data || { ok: false, error: 'risposta vuota' };
-  } catch (e) { return { ok: false, error: 'Claude non risponde: riprova tra poco' }; }
+  } catch (e) { return { ok: false, error: 'nessuna risposta, riprova tra poco' }; }
 }
 
 /* Crea (o riusa) il link della lista e lo passa a WhatsApp, Telegram, email… */

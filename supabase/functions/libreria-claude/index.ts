@@ -2,7 +2,7 @@
 // L'app chiede a Claude cose che i cataloghi non sanno fare bene. Solo per i membri della libreria (Maurizio ed Elena):
 // la chiave di Claude resta qui, tra i segreti di Supabase, e non passa mai dai telefoni.
 // Chiave: LIBRERIA_ANTHROPIC_KEY se c'è (per tenere i costi separati), altrimenti ANTHROPIC_API_KEY già usata dall'HUB.
-//  · {azione: "autore", nome, lingua, vostri: [{titolo, numero}]} → { ok, libri: [{titolo, saga, numero, anno, editore, isbn, prezzo, nota}], riassunto, costo }
+//  · {azione: "autore", nome, lingua, vostri: [{titolo, numero}]} → { ok, libri: [{titolo, saga, numero, anno, editore, isbn, prezzo, nota}], costo }
 const SB = Deno.env.get("SUPABASE_URL")!;
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const out = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -27,24 +27,25 @@ async function membro(auth: string): Promise<boolean> {
 // Una domanda a Claude con la ricerca sul web; «pause_turn» = Claude non ha finito di cercare, si continua.
 async function chiedi(prompt: string, ricerche = 5): Promise<{ testo: string; costo: number; err?: string }> {
   const key = Deno.env.get("LIBRERIA_ANTHROPIC_KEY") || Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) return { testo: "", costo: 0, err: "chiave di Claude mancante" };
+  if (!key) return { testo: "", costo: 0, err: "manca la chiave" };
   const messages: any[] = [{ role: "user", content: prompt }];
   let tin = 0, tout = 0, cerche = 0, testo = "";
   for (let giro = 0; giro < 4; giro++) {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-      body: JSON.stringify({ model: MODELLO, max_tokens: 8000, messages,
+      body: JSON.stringify({ model: MODELLO, max_tokens: 4000, output_config: { effort: "low" }, messages, // poco ragionamento: risposta più rapida
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: ricerche, user_location: { type: "approximate", country: "IT", timezone: "Europe/Rome" } }] }),
     });
     const j = await r.json();
     tin += Number(j?.usage?.input_tokens || 0); tout += Number(j?.usage?.output_tokens || 0); cerche += Number(j?.usage?.server_tool_use?.web_search_requests || 0);
-    if (!r.ok) return { testo: "", costo: 0, err: j?.error?.message || "Claude non risponde" };
+    if (!r.ok) return { testo: "", costo: 0, err: j?.error?.message || "nessuna risposta" };
     testo = (j.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
     if (j.stop_reason !== "pause_turn") break;
     messages.push({ role: "assistant", content: j.content });
   }
   const costo = Math.round(((tin * PREZZO[0] + tout * PREZZO[1]) / 1e6 + cerche * 0.01) * 1000) / 1000;
+  console.log(JSON.stringify({ chiedi: { tin, tout, cerche, costo } }));
   return { testo, costo };
 }
 
@@ -60,20 +61,20 @@ async function autore(b: any) {
     + `Libri di questo autore che la famiglia ha già:\n${vostri || "(nessuno)"}\n\n`
     + `Cerca sul web (siti degli editori, Amazon.it, IBS, Feltrinelli, Wikipedia) i libri di questo autore pubblicati in ${lin}, e indica quelli che la famiglia NON ha ancora.\n`
     + `Regole: solo edizioni in ${lin} realmente pubblicate; per le saghe a volumi indica nome della saga e numero del volume, e metti i volumi che mancano tra quelli posseduti (es. hanno 1-5: proponi 6, 7, …);\n`
-    + `ordina: prima i volumi mancanti delle saghe che hanno già, in ordine di numero; poi le altre saghe e i libri singoli in ordine di uscita. Al massimo 30 libri.\n`
+    + `ordina: prima i volumi mancanti delle saghe che hanno già, in ordine di numero; poi le altre saghe e i libri singoli in ordine di uscita. Al massimo 20 libri.\n`
+    + `Sii rapido: bastano una o due ricerche mirate (per esempio la bibliografia dell'autore e la pagina della saga), non controllare libro per libro.\n`
     + `Non inventare: se non sei sicuro di ISBN o prezzo, metti null. Non ripetere libri che hanno già (stesso titolo e stesso numero).\n`
-    + `Rispondi SOLO con il JSON: {"riassunto": una frase in italiano su cosa manca (es. "Avete i volumi 1-5 della Grande avventura: in italiano ne sono usciti 63"),`
-    + ` "libri": [{"titolo": titolo dell'edizione in ${lin}, "saga": nome della saga o null, "numero": numero del volume o null, "anno": anno o null, "editore": editore o null, "isbn": ISBN-13 o null, "prezzo": prezzo di copertina in euro (numero) o null, "nota": nota brevissima o null}]}`;
-  const r = await chiedi(prompt, 5);
+    + `Rispondi SOLO con il JSON, senza altro testo: {"libri": [{"titolo": titolo dell'edizione in ${lin}, "saga": nome della saga o null, "numero": numero del volume o null, "anno": anno o null, "editore": editore o null, "isbn": ISBN-13 o null, "prezzo": prezzo di copertina in euro (numero) o null, "nota": nota brevissima o null}]}`;
+  const r = await chiedi(prompt, 3);
   if (r.err) return { ok: false, error: r.err };
   const j = jsonDa(r.testo);
   if (!j) return { ok: false, error: "risposta non leggibile", costo: r.costo };
-  const libri = (Array.isArray(j.libri) ? j.libri : []).slice(0, 30).filter((x: any) => x && x.titolo).map((x: any) => ({
+  const libri = (Array.isArray(j.libri) ? j.libri : []).slice(0, 20).filter((x: any) => x && x.titolo).map((x: any) => ({
     titolo: s(x.titolo), saga: x.saga ? s(x.saga, 100) : null, numero: Number(x.numero) || null, anno: /^\d{4}$/.test(String(x.anno)) ? String(x.anno) : null,
     editore: x.editore ? s(x.editore, 60) : null, isbn: /^97[89]\d{10}$/.test(String(x.isbn || "").replace(/-/g, "")) ? String(x.isbn).replace(/-/g, "") : null,
     prezzo: Number(x.prezzo) > 0 && Number(x.prezzo) < 500 ? Number(x.prezzo) : null, nota: x.nota ? s(x.nota, 120) : null,
   }));
-  return { ok: true, riassunto: s(j.riassunto, 300), libri, costo: r.costo };
+  return { ok: true, libri, costo: r.costo };
 }
 
 Deno.serve(async (req) => {

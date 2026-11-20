@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 61; // va tenuto uguale al numero in version.json
+const APP_VERSION = 62; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -910,16 +910,16 @@ function claudeAuthorState(name) {
   return claudeAuthor[name] || null;
 }
 async function askClaudeAuthor(name) {
-  if (typeof askClaude !== 'function' || !cloudReady()) return toast('Per chiedere a Claude serve la libreria online: Impostazioni → La vostra libreria online.');
+  if (typeof askClaude !== 'function' || !cloudReady()) return toast('Per chiedere al Bibliotecario serve la libreria online: Impostazioni → La vostra libreria online.');
   const mine = state.books.filter((b) => authorsOf(b).some((a) => norm(a) === norm(name)));
   const langs = {}; mine.forEach((b) => { if (b.lang) langs[b.lang.slice(0, 2)] = (langs[b.lang.slice(0, 2)] || 0) + 1; });
   const lingua = (Object.entries(langs).sort((a, b) => b[1] - a[1])[0] || ['it'])[0];
   claudeAuthor[name] = { loading: true };
   renderList();
   const r = await askClaude({ azione: 'autore', nome: name, lingua, vostri: mine.map((b) => ({ titolo: [b.title, b.subtitle].filter(Boolean).join(' – '), numero: seriesNumOf(b) || volumeOf(b).num || null })) });
-  if (!r || !r.ok) { claudeAuthor[name] = { error: (r && r.error) || 'Claude non risponde' }; }
+  if (!r || !r.ok) { claudeAuthor[name] = { error: (r && r.error) || 'non risponde' }; }
   else {
-    claudeAuthor[name] = { at: Date.now(), riassunto: r.riassunto || '', libri: r.libri || [], costo: r.costo || 0 };
+    claudeAuthor[name] = { at: Date.now(), libri: r.libri || [], costo: r.costo || 0 };
     try { localStorage.setItem(claudeAuthorKey(name), JSON.stringify(claudeAuthor[name])); } catch (e) { /* niente */ }
     // Copertine di riserva per i libri con ISBN.
     const st = claudeAuthor[name];
@@ -930,32 +930,60 @@ async function askClaudeAuthor(name) {
   }
   if (filterParts().includes('author:' + name)) renderList();
 }
+/* Il «Bibliotecario» è Claude: cerca per voi negli scaffali del web i libri dell'autore che vi mancano. */
+let claudeSort = 'new'; // 'new' = dal più recente, 'old' = dal più vecchio
 function claudeAuthorHtml(name) {
   const st = claudeAuthorState(name);
   const btn = (label) => `<button class="chip claude-ask" data-claude-author="${esc(name)}">✨ ${label}</button>`;
-  if (!st) return `<section class="claude-box"><p class="hint">Claude può cercare sul web i libri di ${esc(name)} che vi mancano, con i volumi delle saghe nell'ordine giusto.</p>${btn('Chiedi a Claude cosa manca')}</section>`;
-  if (st.loading) return `<section class="claude-box"><p class="hint claude-wait">✨ Claude sta cercando… di solito ci vuole meno di un minuto.</p></section>`;
-  if (st.error) return `<section class="claude-box"><p class="hint">Claude non ha risposto: ${esc(st.error)}.</p>${btn('Riprova')}</section>`;
-  const mine = state.books;
-  const have = (x) => mine.some((b) => (x.isbn && b.isbn === x.isbn) || (norm(b.title) === norm(x.titolo) && (!x.numero || (seriesNumOf(b) || volumeOf(b).num) === x.numero)));
-  const libri = st.libri.filter((x) => !have(x));
+  // In cima, i suoi libri che avete già: titolo tra virgolette e anno.
+  const mine = state.books.filter((b) => !b.list && authorsOf(b).some((a) => norm(a) === norm(name)));
+  const haveBox = mine.length ? `<div class="claude-have"><strong>Avete già</strong><ul>${mine.slice()
+    .sort((a, b) => (Number(a.year) || 9999) - (Number(b.year) || 9999))
+    .map((b) => `<li>«${esc(b.title)}»${seriesNumOf(b) ? ' n. ' + seriesNumOf(b) : ''}${b.year ? ' (' + esc(b.year) + ')' : ''}</li>`).join('')}</ul></div>` : '';
+  if (!st) return `<section class="claude-box">${haveBox}<p class="hint">Il Bibliotecario può cercare per voi i libri di ${esc(name)} che vi mancano, con i volumi delle saghe.</p>${btn('Chiedi al Bibliotecario')}</section>`;
+  if (st.loading) return `<section class="claude-box">${haveBox}<p class="hint claude-wait">✨ Il Bibliotecario sta cercando tra gli scaffali…</p></section>`;
+  if (st.error) return `<section class="claude-box">${haveBox}<p class="hint">Il Bibliotecario non ha trovato risposta: ${esc(st.error)}.</p>${btn('Riprova')}</section>`;
+  const have = (x) => state.books.some((b) => (x.isbn && b.isbn === x.isbn) || (norm(b.title) === norm(x.titolo) && (!x.numero || (seriesNumOf(b) || volumeOf(b).num) === x.numero)));
+  const year = (x) => Number(x.anno) || 0;
+  const libri = st.libri.filter((x) => !have(x)).sort((a, b) => (claudeSort === 'new' ? year(b) - year(a) : (year(a) || 9999) - (year(b) || 9999)) || (a.numero || 0) - (b.numero || 0));
   const days = Math.floor((Date.now() - st.at) / 864e5);
-  return `<section class="claude-box"><h3 class="shelf-label">✨ Secondo Claude · ${libri.length}</h3>
-    ${st.riassunto ? `<p class="claude-sum">${esc(st.riassunto)}</p>` : ''}
+  return `<section class="claude-box">${haveBox}
+    <div class="claude-head"><h3 class="shelf-label">✨ Il Bibliotecario propone · ${libri.length}</h3>
+      ${libri.length > 1 ? `<div class="seg claude-sort"><button data-claude-sort="new" class="${claudeSort === 'new' ? 'on' : ''}">Più recenti</button><button data-claude-sort="old" class="${claudeSort === 'old' ? 'on' : ''}">Più vecchi</button></div>` : ''}</div>
     ${libri.map((x) => `<div class="book more-book">${coverHtml({ title: x.titolo, authors: name, cover: x.cover || '' })}
-      <span class="book-info"><span class="book-title">${esc(x.titolo)}${x.numero && !String(x.titolo).includes(String(x.numero)) ? ' n. ' + x.numero : ''}</span>
+      <span class="book-info"><span class="book-title">«${esc(x.titolo)}»${x.numero && !String(x.titolo).includes(String(x.numero)) ? ' n. ' + x.numero : ''}</span>
       <span class="book-author">${esc([x.saga && x.saga !== x.titolo ? x.saga + (x.numero ? ' n. ' + x.numero : '') : '', x.anno, x.editore, x.prezzo ? euro(x.prezzo) : ''].filter(Boolean).join(' · '))}</span>
       ${x.nota ? `<span class="book-author claude-note">${esc(x.nota)}</span>` : ''}
-      <span class="more-actions"><button class="chip" data-claude-wish="${esc(name)}|${st.libri.indexOf(x)}">＋ Desideri</button>${storeLinks({ title: x.titolo + (x.numero && !String(x.titolo).includes(String(x.numero)) ? ' ' + x.numero : ''), authors: name }).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('') || '<p class="hint">Claude non ha trovato altri libri che vi mancano.</p>'}
-    <p class="hint claude-foot">Risposta di ${days ? days === 1 ? 'ieri' : days + ' giorni fa' : 'oggi'}. Claude può sbagliare: controlla prima di comprare. ${btn('Chiedi di nuovo')}</p>
+      <span class="more-actions"><button class="chip" data-claude-wish="${esc(name)}|${st.libri.indexOf(x)}">＋ Desideri</button>${storeLinks({ title: x.titolo + (x.numero && !String(x.titolo).includes(String(x.numero)) ? ' ' + x.numero : ''), authors: name }).slice(0, 1).map(([l, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${l}</a>`).join('')}</span></span></div>`).join('') || '<p class="hint">Il Bibliotecario non ha trovato altri suoi libri che vi mancano.</p>'}
+    <p class="hint claude-foot">Ricerca di ${days ? days === 1 ? 'ieri' : days + ' giorni fa' : 'oggi'}. Il Bibliotecario può sbagliare: controlla prima di comprare. ${btn('Cerca di nuovo')}</p>
   </section>`;
 }
+
+/* Scelta della lista desideri: se ce n'è più di una, si chiede quale. */
+function chooseWishlist(title, done) {
+  if (!state.wishlists.length) state.wishlists.push('Da comprare');
+  if (state.wishlists.length === 1) return done(state.wishlists[0]);
+  const wrap = document.createElement('div');
+  wrap.className = 'pick-list';
+  wrap.innerHTML = `<div class="pick-list-card" role="dialog" aria-label="In quale lista?"><p>In quale lista metto «${esc(title)}»?</p>
+    ${state.wishlists.map((l, i) => `<button class="btn ghost wide" data-i="${i}">${esc(l)}</button>`).join('')}
+    <button class="btn wide pick-list-no">Annulla</button></div>`;
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-i]');
+    if (b) { close(); done(state.wishlists[Number(b.dataset.i)]); return; }
+    if (e.target === wrap || e.target.closest('.pick-list-no')) close();
+  });
+  document.body.appendChild(wrap);
+}
+
 function addClaudeToWish(key) {
   const i = key.lastIndexOf('|'), name = key.slice(0, i);
   const x = ((claudeAuthorState(name) || {}).libri || [])[Number(key.slice(i + 1))];
   if (!x) return;
-  if (!state.wishlists.length) state.wishlists.push('Da comprare');
-  const list = state.wishlists[0];
+  chooseWishlist(x.titolo, (list) => addClaudeBook(x, name, list));
+}
+function addClaudeBook(x, name, list) {
   const b = { id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: x.isbn || '', title: x.titolo, subtitle: x.numero && !String(x.titolo).includes(String(x.numero)) ? 'Volume ' + x.numero : '', authors: name, publisher: x.editore || '',
     year: x.anno || '', pages: '', cover: x.cover || '', genres: [], owners: [], list, status: '', media: [], price: x.prezzo ? String(x.prezzo) : '',
     series: x.saga || '', seriesNum: x.numero ? String(x.numero) : '' };
@@ -1032,14 +1060,14 @@ function addAuthorMoreToWish(key) {
   const i = key.lastIndexOf('|');
   const x = (authorMore[key.slice(0, i)] || {}).items?.[Number(key.slice(i + 1))];
   if (!x) return;
-  if (!state.wishlists.length) state.wishlists.push('Da comprare');
-  const list = pref('libreria.lastList', '') && state.wishlists.includes(pref('libreria.lastList', '')) ? pref('libreria.lastList', '') : state.wishlists[0];
+  chooseWishlist(x.title, (list) => {
   state.books.push({ id: newId(), addedAt: Date.now(), updatedAt: Date.now(), isbn: x.isbn || '', title: x.title, subtitle: x.subtitle || '', authors: x.authors || '', publisher: x.publisher || '',
     year: x.year || '', pages: x.pages || '', cover: x.cover || '', plot: x.description || '', plotTried: true, lang: x.lang || '',
     genres: suggestGenres(x.subjects, x.authors, x.description).genres.filter((g) => state.genres.includes(g)), owners: [], list, status: '', media: [] });
   saveState();
   renderList();
   toast('«' + x.title + '» aggiunto ai desideri: ' + list);
+  });
 }
 
 function discoverHtml() {
@@ -1068,7 +1096,7 @@ function discoverHtml() {
     <h3 class="rail-label">Da scoprire<small>${esc(when)}</small></h3>
     ${body || `<div class="disc-empty">
       <div class="disc-ghosts" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-      <p><strong>Presto, ogni settimana</strong>I libri più venduti in Italia e quelli simili ai vostri, scelti da Claude a partire dai libri che avete votato bene e dai vostri temi. Con un tocco finiscono nei desideri.</p>
+      <p><strong>Presto, ogni settimana</strong>I libri più venduti in Italia e quelli simili ai vostri, scelti dal Bibliotecario a partire dai libri che avete votato bene e dai vostri temi. Con un tocco finiscono nei desideri.</p>
     </div>`}
   </section>`;
 }
@@ -1078,7 +1106,7 @@ function openDiscover(i) {
   const own = haveIt(it);
   if (own) return openView(own);
   if (it.isbn && toIsbn13(it.isbn)) return handleIsbn(toIsbn13(it.isbn));
-  openBook({ title: it.title || '', authors: it.authors || '', cover: it.cover ? httpsUrl(it.cover) : '', genres: [] }, { banner: it.reason ? 'Suggerito da Claude: ' + it.reason : '' });
+  openBook({ title: it.title || '', authors: it.authors || '', cover: it.cover ? httpsUrl(it.cover) : '', genres: [] }, { banner: it.reason ? 'Suggerito dal Bibliotecario: ' + it.reason : '' });
 }
 
 /* «Cosa leggo stasera?»: pesca a caso tra i Da leggere (rispettando il filtro attivo), anche per lunghezza. */
@@ -2926,7 +2954,8 @@ function init() {
   $('list').addEventListener('click', (e) => {
     const m = e.target.closest('[data-more-wish]'); if (m) { e.stopPropagation(); addAuthorMoreToWish(m.dataset.moreWish); return; }
     const c = e.target.closest('[data-claude-author]'); if (c) { e.stopPropagation(); askClaudeAuthor(c.dataset.claudeAuthor); return; }
-    const w = e.target.closest('[data-claude-wish]'); if (w) { e.stopPropagation(); addClaudeToWish(w.dataset.claudeWish); }
+    const w = e.target.closest('[data-claude-wish]'); if (w) { e.stopPropagation(); addClaudeToWish(w.dataset.claudeWish); return; }
+    const so = e.target.closest('[data-claude-sort]'); if (so) { e.stopPropagation(); claudeSort = so.dataset.claudeSort; renderList(); }
   });
 
   // La testata si ritira scorrendo verso il basso e torna risalendo.

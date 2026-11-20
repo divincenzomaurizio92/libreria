@@ -863,3 +863,11 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .claude-foot .chip { margin-top: 8px; }
 .claude-wait { animation: claude-pulse 1.6s ease-in-out infinite; }
 @keyframes claude-pulse { 50% { opacity: .45; } }
+.claude-have { margin: 0 0 14px; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+.claude-have ul { margin: 6px 0 0; padding-left: 18px; }
+.claude-have li { margin: 2px 0; }
+.claude-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.claude-sort button { min-height: 34px; font-size: 13px; padding: 0 10px; }
+.pick-list { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, .55); display: grid; place-items: end center; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.pick-list-card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.pick-list-card p { margin: 0 0 6px; font-weight: 600; }

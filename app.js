@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 74; // va tenuto uguale al numero in version.json
+const APP_VERSION = 75; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -570,7 +570,7 @@ function toggleFilter(v) {
   const parts = filterParts();
   filterGenre = (parts.includes(v) ? parts.filter((p) => p !== v) : [...parts.filter((p) => filterKind(p) !== filterKind(v)), v]).join('|');
 }
-let viewMode = 'library'; // 'library' = libri posseduti, 'wish' = liste desideri
+let viewMode = 'home'; // 'home' = pagina iniziale, 'library' = libri posseduti, 'wish' = liste desideri, 'audio', 'discover' = Scopri
 let filterList = '';
 let claims = {}; // libri dei desideri prenotati da chi ha il link della lista: id libro → { name, id }
 // Il nome di chi regala resta nascosto (sorpresa!) finché non si tocca «Mostra»: vale fino alla chiusura dell'app.
@@ -1443,6 +1443,101 @@ function renderYear() {
     <p class="hint">Da oggi le date si segnano da sole: «In corso» è l'inizio, «Letto» la fine, per chi usa il telefono. Per i libri letti prima contano «Letto nel» e «Di chi è».</p>`;
 }
 
+/* ================= PAGINA INIZIALE (v75) =================
+   Saluto, ricerca, il libro che si sta leggendo, «Cosa leggo stasera?», le mensole e gli ultimi arrivati.
+   In basso la barra: Libreria (questa pagina), Desideri, scanner, Scopri, Il mio anno. */
+function renderNav() {
+  const on = viewMode === 'wish' ? 'wish' : viewMode === 'discover' ? 'discover' : 'home';
+  for (const b of document.querySelectorAll('.navbar [data-nav]')) {
+    const yes = b.dataset.nav === on;
+    b.classList.toggle('on', yes);
+    if (yes) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  }
+  document.body.dataset.page = viewMode;
+  const h1 = document.querySelector('.top h1');
+  if (h1) h1.textContent = viewMode === 'wish' ? 'Desideri' : 'Libreria';
+}
+function sinceText(d) {
+  if (!d) return '';
+  const n = Math.round((new Date(today() + 'T12:00:00') - new Date(d + 'T12:00:00')) / 864e5);
+  return n <= 0 ? 'Iniziato oggi' : n === 1 ? 'Iniziato ieri' : 'Iniziato ' + n + ' giorni fa';
+}
+function readingNow() {
+  const me = pref('libreria.me', '');
+  const mine = (b) => readsOf(b).some((r) => !r.end && r.who === me) || ownersOf(b).includes(me);
+  const all = state.books.filter((b) => isOwned(b) && b.status === 'reading');
+  return me && state.owners.includes(me) ? [...all.filter(mine), ...all.filter((b) => !mine(b))] : all;
+}
+function renderHome() {
+  const owned = state.books.filter(isOwned);
+  const day = new Date().toLocaleDateString('it-IT', { weekday: 'long' });
+  const h = new Date().getHours();
+  const part = h >= 5 && h < 13 ? 'mattina' : h >= 13 && h < 18 ? 'pomeriggio' : 'sera';
+  const me = pref('libreria.me', '');
+  const who = me && state.owners.includes(me) ? me : '';
+  const reading = readingNow();
+  const cur = reading[0];
+  const open = cur && readsOf(cur).filter((r) => !r.end).pop();
+  const started = (open && open.start) || (cur && cur.startedAt) || '';
+  const recent = [...owned].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, 10);
+  const svg = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+  $('list').innerHTML = `<header class="home-head">
+      <div class="home-hello">
+        <p class="count">${esc(day.charAt(0).toUpperCase() + day.slice(1))} ${part} · ${owned.length === 1 ? '1 libro' : owned.length + ' libri'}</p>
+        <h1>${esc(greeting())}</h1>
+      </div>
+      <button class="icon-btn" data-home="manual" aria-label="Aggiungi un libro scrivendo titolo o ISBN">${svg('<path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20zM14.5 6l3 3"/>')}</button>
+      <button class="icon-btn" data-home="settings" aria-label="Impostazioni e backup">${svg('<path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4.5v5M6 14.5v5"/>')}</button>
+      ${state.owners.length ? `<button class="home-me" data-home="me" aria-label="${who ? 'Chi usa il telefono: ' + esc(who) + '. Tocca per cambiare' : 'Scegli chi usa il telefono'}">${who ? esc(who.charAt(0).toUpperCase()) : '?'}</button>` : ''}
+    </header>
+    <button class="home-search" data-home="search">${svg('<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>')}<span>Cerca titolo, autore, ISBN…</span></button>
+    ${cur ? `<section class="home-reading" aria-label="Stai leggendo">
+        <button class="home-reading-cover" data-id="${esc(cur.id)}" aria-label="Apri ${esc(cur.title)}">${coverHtml(cur, true)}</button>
+        <div class="home-reading-info">
+          <p class="home-kicker">${who && reading.length && (readsOf(cur).some((r) => !r.end && r.who === who) || ownersOf(cur).includes(who)) ? 'Stai leggendo' : 'In lettura'}</p>
+          <button class="home-reading-title" data-id="${esc(cur.id)}">${esc(cur.title)}</button>
+          <p class="hint">${esc(cur.authors || '')}${started ? (cur.authors ? ' · ' : '') + sinceText(started) : ''}</p>
+          <button class="btn primary" data-home-done="${esc(cur.id)}">Finito! Segna come letto</button>
+        </div>
+      </section>
+      ${reading.length > 1 ? `<p class="hint home-also">In lettura anche: ${reading.slice(1, 4).map((b) => `<button class="link-btn" data-id="${esc(b.id)}">${esc(b.title)}</button>`).join(', ')}</p>` : ''}`
+    : `<section class="home-reading empty-reading"><div class="home-reading-info">
+        <p class="home-kicker">In lettura</p>
+        <p class="home-reading-title">Nessun libro in corso</p>
+        <p class="hint">Quando ne iniziate uno, segnatelo «In corso»: qui comparirà con la data di inizio.</p>
+      </div></section>`}
+    <div class="home-tiles">
+      <button class="home-tile" data-pick>${svg('<path d="M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z"/>')}<b>Cosa leggo stasera?</b><span>Te ne propongo uno</span></button>
+      <button class="home-tile" data-home="shelf">${svg('<path d="M5 4v14M9 6v12M13 4v14M17 8v10M3 20h18"/>')}<b>Le mensole</b><span>Tutti i libri a scaffale</span></button>
+    </div>
+    ${recent.length ? `<section class="home-recent" aria-label="Aggiunti di recente">
+      <div class="home-sec-head"><h2>Aggiunti di recente</h2><button class="link-btn" data-home="all">Vedi tutti (${owned.length})</button></div>
+      <div class="home-covers">${recent.map((b) => `<button class="home-cover" data-id="${esc(b.id)}" aria-label="${esc(b.title)}">${coverHtml(b, true)}</button>`).join('')}</div>
+    </section>` : `<div class="empty"><strong>La libreria è vuota</strong>Tocca il pulsante tondo in basso, al centro, e inquadra il codice a barre sul retro del libro.</div>`}`;
+}
+function homeAction(what) {
+  if (what === 'manual') return openManual();
+  if (what === 'settings') return $('btn-settings').click();
+  if (what === 'me') {
+    const list = state.owners;
+    if (!list.length) return;
+    const me = pref('libreria.me', '');
+    const next = list[(list.indexOf(me) + 1) % list.length];
+    setPref('libreria.me', next);
+    renderList();
+    return toast('Ora il telefono è di ' + next + ': le letture si segnano a suo nome.');
+  }
+  viewMode = 'library'; filterGenre = ''; filterList = ''; backTo = null;
+  if (what === 'shelf') { if (viewKind !== 'shelf') { flatView = viewKind; setPref('libreria.flatView', flatView); } viewKind = 'shelf'; }
+  else if (viewKind === 'shelf') viewKind = flatView === 'list' ? 'list' : 'grid';
+  setPref('libreria.view', viewKind);
+  if (what === 'search') { $('tools').hidden = false; }
+  renderList();
+  window.scrollTo(0, 0);
+  document.querySelector('.top').classList.remove('away');
+  if (what === 'search') $('search').focus();
+}
+
 function greeting() {
   const h = new Date().getHours();
   const word = h >= 5 && h < 13 ? 'Buongiorno' : h >= 13 && h < 18 ? 'Buon pomeriggio' : 'Buonasera';
@@ -1452,6 +1547,14 @@ function greeting() {
 
 function renderList() {
   suggItems = [];
+  renderNav();
+  if (viewMode === 'home' || viewMode === 'discover') {
+    if (selecting) setSelecting(false);
+    visibleIds = [];
+    $('list').className = 'list page-' + viewMode;
+    if (viewMode === 'home') renderHome(); else $('list').innerHTML = `<header class="page-head"><h1>Scopri</h1><p class="count">I più venduti e i libri simili ai vostri preferiti</p></header>` + discoverHtml();
+    return;
+  }
   const q = $('search').value.trim().toLowerCase();
   const sort = $('sort').value;
   const wish = viewMode === 'wish';
@@ -1601,7 +1704,6 @@ function renderList() {
   if (authorPage && total) $('list').insertAdjacentHTML('beforeend', claudeAuthorHtml(authorPage.slice(7)) + authorMoreHtml(authorPage.slice(7)));
   // Nei desideri, senza ricerca né lista scelta, in cima c'è «Da scoprire».
   // I vostri desideri in cima, sempre sott'occhio; «Da scoprire» sotto.
-  if (wish && !q && !filterList) $('list').insertAdjacentHTML('beforeend', discoverHtml());
   visibleIds = books.map((b) => b.id);
   $('btn-back').hidden = !backTo;
   const showing = total && books.length;
@@ -3053,11 +3155,12 @@ function topLayer() {
   // Una pagina diversa dalla libreria di partenza (Desideri, Audible, un filtro, una ricerca, un autore…):
   // il gesto indietro riporta alla libreria invece di chiudere l'app.
   const q = $('search') && $('search').value.trim();
-  return viewMode !== 'library' || filterGenre || filterList || q ? 'home' : null;
+  return viewMode !== 'home' ? 'home' : null;
 }
 
 function goHome() {
-  viewMode = 'library'; filterGenre = ''; filterList = ''; groupBy = ''; groupFor = '';
+  viewMode = 'home'; filterGenre = ''; filterList = ''; groupBy = ''; groupFor = ''; backTo = null;
+  $('tools').hidden = true;
   if ($('search').value) $('search').value = '';
   renderList();
   window.scrollTo(0, 0);
@@ -3172,21 +3275,36 @@ function init() {
   document.addEventListener('click', (e) => { if (!e.target.closest('#view-menu')) closeViewMenu(); });
   window.addEventListener('scroll', closeViewMenu, { passive: true });
   // Home: si torna sempre al punto zero, cioè tutte le copertine della libreria, senza filtri.
-  $('btn-home').addEventListener('click', () => {
+  // Casa e «Libreria» nella barra in basso: si torna sempre alla pagina iniziale, senza filtri.
+  const toHome = () => {
     for (const id of ['view', 'book', 'settings', 'manual', 'filter-sheet', 'arrange']) hide(id);
-    backTo = null;
     closePeek();
-    viewMode = 'library';
-    viewKind = 'grid';
-    setPref('libreria.view', 'grid');
-    filterGenre = '';
-    filterList = '';
-    $('search').value = '';
-    $('tools').hidden = true;
-    renderList();
-    window.scrollTo(0, 0);
+    goHome();
     document.querySelector('.top').classList.remove('away');
+  };
+  $('btn-home').addEventListener('click', toHome);
+  $('nav-home').addEventListener('click', toHome);
+  $('nav-wish').addEventListener('click', () => {
+    closePeek(); backTo = null; viewMode = 'wish'; $('tools').hidden = true; $('search').value = '';
+    if (viewKind === 'shelf') viewKind = flatView === 'list' ? 'list' : 'grid';
+    renderList(); window.scrollTo(0, 0); document.querySelector('.top').classList.remove('away');
   });
+  $('nav-discover').addEventListener('click', () => {
+    closePeek(); backTo = null; viewMode = 'discover'; renderList(); window.scrollTo(0, 0);
+  });
+  $('list').addEventListener('click', (e) => {
+    const h = e.target.closest('[data-home]');
+    if (h) { e.stopImmediatePropagation(); homeAction(h.dataset.home); return; }
+    const d = e.target.closest('[data-home-done]');
+    if (d) {
+      e.stopImmediatePropagation();
+      const b = state.books.find((x) => x.id === d.dataset.homeDone);
+      if (!b) return;
+      const prev = { status: b.status, readAt: b.readAt, startedAt: b.startedAt, reads: JSON.parse(JSON.stringify(readsOf(b))) };
+      setStatus(b, 'read'); b.updatedAt = Date.now(); saveState(); renderList();
+      toast('«' + b.title + '» segnato come letto, con la data di oggi.', 'Annulla', () => { Object.assign(b, prev); b.updatedAt = Date.now(); saveState(); renderList(); });
+    }
+  }, true);
   $('btn-arrange').addEventListener('click', () => { renderArrange(); show('arrange'); $('arrange-body').parentNode.scrollTop = 0; });
   $('arrange-close').addEventListener('click', () => hide('arrange'));
   $('arrange-body').addEventListener('click', (e) => {

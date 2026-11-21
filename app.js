@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 75; // va tenuto uguale al numero in version.json
+const APP_VERSION = 76; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -1447,7 +1447,7 @@ function renderYear() {
    Saluto, ricerca, il libro che si sta leggendo, «Cosa leggo stasera?», le mensole e gli ultimi arrivati.
    In basso la barra: Libreria (questa pagina), Desideri, scanner, Scopri, Il mio anno. */
 function renderNav() {
-  const on = viewMode === 'wish' ? 'wish' : viewMode === 'discover' ? 'discover' : 'home';
+  const on = viewMode === 'wish' ? 'wish' : viewMode === 'discover' ? 'discover' : viewMode === 'home' ? 'home' : 'library';
   for (const b of document.querySelectorAll('.navbar [data-nav]')) {
     const yes = b.dataset.nav === on;
     b.classList.toggle('on', yes);
@@ -1499,13 +1499,13 @@ function renderHome() {
           <p class="hint">${esc(cur.authors || '')}${started ? (cur.authors ? ' · ' : '') + sinceText(started) : ''}</p>
           <button class="btn primary" data-home-done="${esc(cur.id)}">Finito! Segna come letto</button>
         </div>
-      </section>
-      ${reading.length > 1 ? `<p class="hint home-also">In lettura anche: ${reading.slice(1, 4).map((b) => `<button class="link-btn" data-id="${esc(b.id)}">${esc(b.title)}</button>`).join(', ')}</p>` : ''}`
+      </section>`
     : `<section class="home-reading empty-reading"><div class="home-reading-info">
         <p class="home-kicker">In lettura</p>
         <p class="home-reading-title">Nessun libro in corso</p>
         <p class="hint">Quando ne iniziate uno, segnatelo «In corso»: qui comparirà con la data di inizio.</p>
       </div></section>`}
+    ${yearRowHtml(who)}
     <div class="home-tiles">
       <button class="home-tile" data-pick>${svg('<path d="M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z"/>')}<b>Cosa leggo stasera?</b><span>Te ne propongo uno</span></button>
       <button class="home-tile" data-home="shelf">${svg('<path d="M5 4v14M9 6v12M13 4v14M17 8v10M3 20h18"/>')}<b>Le mensole</b><span>Tutti i libri a scaffale</span></button>
@@ -1515,7 +1515,20 @@ function renderHome() {
       <div class="home-covers">${recent.map((b) => `<button class="home-cover" data-id="${esc(b.id)}" aria-label="${esc(b.title)}">${coverHtml(b, true)}</button>`).join('')}</div>
     </section>` : `<div class="empty"><strong>La libreria è vuota</strong>Tocca il pulsante tondo in basso, al centro, e inquadra il codice a barre sul retro del libro.</div>`}`;
 }
+/* «Il mio anno» nella pagina iniziale: i libri letti quest'anno e, se c'è, la barra verso l'obiettivo. */
+function yearRowHtml(who) {
+  const y = new Date().getFullYear();
+  const n = state.books.filter((b) => !b.list && isReadBy(b, who) && readYear(b, who) === y).length;
+  const goal = goalOf(who, y);
+  const pct = goal ? Math.min(100, Math.round((n / goal) * 100)) : 0;
+  const txt = goal ? n + ' letti su ' + goal + ' · ' + pct + '%' : (n === 1 ? '1 libro letto' : n + ' libri letti') + ' · imposta l\'obiettivo';
+  return `<button class="home-year" data-home="year" aria-label="Il mio anno: ${esc(txt)}. Apri la pagina">
+    <span class="home-year-top"><b>Il mio anno${who ? '' : ' in libri'}</b><span>${esc(txt)} ›</span></span>
+    <span class="home-year-bar" aria-hidden="true"><span style="width:${goal ? pct : 0}%"></span></span>
+  </button>`;
+}
 function homeAction(what) {
+  if (what === 'year') return $('btn-year').click();
   if (what === 'manual') return openManual();
   if (what === 'settings') return $('btn-settings').click();
   if (what === 'me') {
@@ -3284,6 +3297,7 @@ function init() {
   };
   $('btn-home').addEventListener('click', toHome);
   $('nav-home').addEventListener('click', toHome);
+  $('nav-library').addEventListener('click', () => { closePeek(); homeAction('all'); });
   $('nav-wish').addEventListener('click', () => {
     closePeek(); backTo = null; viewMode = 'wish'; $('tools').hidden = true; $('search').value = '';
     if (viewKind === 'shelf') viewKind = flatView === 'list' ? 'list' : 'grid';

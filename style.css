@@ -1015,3 +1015,14 @@ body[data-page="wish"] .tabs { display: none; }
 .navbar #btn-scan { width: 66px; height: 66px; min-height: 66px; flex: 0 0 66px; padding: 0; }
 .navbar #btn-scan svg { width: 28px; height: 28px; }
 @media (orientation: landscape) and (max-height: 560px) { .navbar #btn-scan { width: 54px; height: 54px; min-height: 54px; flex-basis: 54px; } }
+/* v76: «Il mio anno» nella pagina iniziale */
+.home-year {
+  width: 100%; display: flex; flex-direction: column; gap: 9px; margin-top: 12px; padding: 13px 14px; min-height: 64px;
+  border-radius: 16px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; font: inherit;
+}
+.home-year-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.home-year-top b { font: 600 16px var(--font-body); }
+.home-year-top span { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.home-year-bar { display: block; height: 9px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; }
+.home-year-bar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.home-tiles { margin-top: 12px; }

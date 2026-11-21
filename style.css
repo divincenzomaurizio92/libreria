@@ -924,3 +924,17 @@ a.chip { display: inline-flex; align-items: center; justify-content: center; tex
 .wish-actions .chip { min-height: 34px; font-size: 13.5px; }
 .pick-plot { margin: 12px 0 4px; font-size: 14.5px; line-height: 1.5; max-height: 40vh; overflow-y: auto; }
 .pick-plot .link-btn { display: inline; padding: 0; font-size: inherit; }
+
+/* v74 — storico delle letture */
+.reads { margin: 0 0 6px; padding-left: 18px; font-size: 14.5px; line-height: 1.5; }
+.reads-add { margin: 12px 0 0; display: inline-block; }
+.reads-edit { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+.reads-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); align-items: center; }
+.reads-row select { grid-column: 1 / -1; }
+.reads-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.reads-row input, .reads-row select { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); padding: 0 8px; font: inherit; }
+.reads-row .danger { grid-column: 1 / -1; justify-self: start; color: #E58A7A; }
+.view-label .link-btn { font-size: 13px; margin-left: 8px; text-transform: none; letter-spacing: 0; }
+.hist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.hist-row { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.hist-row span { color: var(--muted); font-size: 13px; }

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 73; // va tenuto uguale al numero in version.json
+const APP_VERSION = 74; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -118,12 +118,40 @@ let stickyStatus = ''; // lo stato scelto resta proposto mentre si scansionano p
 const todayIt = () => new Date().toLocaleDateString('it-IT');
 const showRead = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? itDate(v) : v);
 
-function setStatus(b, status) {
+/* Storico delle letture: per ogni libro, chi l'ha letto e quando. Si compila da solo:
+   «In corso» = inizio oggi, «Letto» = fine oggi. Chi legge è la persona di «Chi usa questo telefono»
+   (o l'unica persona del libro). Una rilettura apre una voce nuova. Le date si possono correggere nella scheda.
+   b.reads = [{ id, who, start: 'AAAA-MM-GG' | '', end: 'AAAA-MM-GG' | '' }] */
+function readerFor(b) {
+  const me = typeof pref === 'function' ? pref('libreria.me', '') : '';
+  if (me && state.owners.includes(me)) return me;
+  const o = ownersOf(b);
+  return o.length === 1 ? o[0] : '';
+}
+function setStatus(b, status, opts = {}) {
   const before = b.status || '';
   b.status = status || '';
   if (b.status === 'read') { if (!b.readAt && before === 'reading') b.readAt = todayIt(); } else b.readAt = '';
   if (b.status === 'reading' && !b.startedAt) b.startedAt = today();
+  if (b.status !== 'reading') b.startedAt = b.status === 'read' ? b.startedAt : '';
+  if (opts.bulk || before === b.status) return; // in blocco (vecchi libri) niente date inventate
+  const who = readerFor(b);
+  b.reads = Array.isArray(b.reads) ? b.reads : [];
+  const open = b.reads.filter((r) => !r.end && (!who || !r.who || r.who === who)).pop();
+  if (b.status === 'reading') {
+    if (!open) b.reads.push({ id: newId(), who, start: today(), end: '' });
+  } else if (b.status === 'read') {
+    if (open) { open.end = today(); if (!open.who) open.who = who; }
+    else b.reads.push({ id: newId(), who, start: before === 'reading' && b.startedAt ? b.startedAt : '', end: today() });
+    b.readAt = b.readAt || todayIt();
+  } else if (open) {
+    // Tolto «In corso» senza finirlo: la lettura aperta si toglie (era per sbaglio o è stato lasciato).
+    b.reads = b.reads.filter((r) => r !== open);
+  }
 }
+const readsOf = (b) => (Array.isArray(b.reads) ? b.reads : []);
+const fmtDay = (d) => (d ? new Date(d + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const daysBetween = (a, z) => (a && z ? Math.max(1, Math.round((new Date(z) - new Date(a)) / 864e5) + 1) : 0);
 
 const euro = (n) => Number(n).toFixed(2).replace('.', ',') + ' €';
 
@@ -1330,8 +1358,12 @@ function openPick(again) {
    «Letto nel» può essere un anno (2019) o una data (12/03/2026): se ne prende l'anno, e il mese quando c'è.
    Un libro conta per le persone di «Di chi è»; senza persone conta solo in «Tutti». */
 let yearWho = null, yearSel = new Date().getFullYear();
-const readYear = (b) => { const m = String(b.readAt || '').match(/(?:^|\D)((?:19|20)\d{2})(?:\D|$)/); return m ? Number(m[1]) : 0; };
-const readMonth = (b) => {
+// Con lo storico: la lettura finita di quella persona (la più recente). Senza storico: «Letto nel» e «Di chi è».
+const doneBy = (b, who) => readsOf(b).filter((r) => r.end && (!who || r.who === who || (!r.who && ownersOf(b).includes(who)))).pop() || null;
+const isReadBy = (b, who) => (readsOf(b).some((r) => r.end) ? Boolean(doneBy(b, who)) : b.status === 'read' && (!who || ownersOf(b).includes(who)));
+const readYear = (b, who) => { const e = doneBy(b, who); if (e) return Number(e.end.slice(0, 4)); const m = String(b.readAt || '').match(/(?:^|\D)((?:19|20)\d{2})(?:\D|$)/); return m ? Number(m[1]) : 0; };
+const readMonth = (b, who) => {
+  const e = doneBy(b, who); if (e) return Number(e.end.slice(5, 7));
   const v = String(b.readAt || '');
   let m = v.match(/^(\d{4})-(\d{2})-\d{2}$/); if (m) return Number(m[2]);
   m = v.match(/^\d{1,2}[/.-](\d{1,2})[/.-]\d{4}$/); return m ? Number(m[1]) : 0;
@@ -1343,11 +1375,17 @@ function renderYear() {
   if (yearWho === null) { const me = pref('libreria.me', ''); yearWho = state.owners.includes(me) ? me : ''; }
   if (yearWho && !state.owners.includes(yearWho)) yearWho = '';
   const now = new Date(), thisYear = now.getFullYear();
-  const mine = state.books.filter((b) => !b.list && b.status === 'read' && (!yearWho || ownersOf(b).includes(yearWho)));
-  const years = [...new Set([thisYear, ...mine.map(readYear).filter(Boolean)])].sort((a, b) => b - a);
+  const W = yearWho;
+  const mine = state.books.filter((b) => !b.list && isReadBy(b, W));
+  const years = [...new Set([thisYear, ...mine.map((b) => readYear(b, W)).filter(Boolean)])].sort((a, b) => b - a);
   if (!years.includes(yearSel)) yearSel = thisYear;
-  const read = mine.filter((b) => readYear(b) === yearSel).sort((a, b) => (readMonth(b) - readMonth(a)) || (b.updatedAt || 0) - (a.updatedAt || 0));
-  const undated = mine.filter((b) => !readYear(b)).length;
+  const read = mine.filter((b) => readYear(b, W) === yearSel).sort((a, b) => (readMonth(b, W) - readMonth(a, W)) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  const undated = mine.filter((b) => !readYear(b, W)).length;
+  // Storico dell'anno: le letture con le date (inizio–fine), le più recenti in cima.
+  const history = read.map((b) => ({ b, e: doneBy(b, W) })).filter((x) => x.e).sort((a, z) => z.e.end.localeCompare(a.e.end));
+  const timed = history.filter((x) => x.e.start);
+  const avgDays = timed.length ? Math.round(timed.reduce((t, x) => t + daysBetween(x.e.start, x.e.end), 0) / timed.length) : 0;
+  const reading = state.books.filter((b) => !b.list && readsOf(b).some((r) => !r.end && r.start && (!W || r.who === W)));
   const goal = goalOf(yearWho, yearSel);
   const n = read.length;
   const pages = read.reduce((t, b) => t + (Number(b.pages) || 0), 0);
@@ -1359,7 +1397,7 @@ function renderYear() {
   const longest = read.filter((b) => Number(b.pages)).sort((a, b) => b.pages - a.pages)[0];
   const heard = read.filter((b) => mediaOf(b).includes('audio') && !hasPaper(b)).length;
   const best = rated.filter((b) => b.rating >= 4).sort((a, b) => b.rating - a.rating).slice(0, 3);
-  const months = Array.from({ length: 12 }, (_, i) => read.filter((b) => readMonth(b) === i + 1).length);
+  const months = Array.from({ length: 12 }, (_, i) => read.filter((b) => readMonth(b, W) === i + 1).length);
   const maxM = Math.max(1, ...months);
 
   // Obiettivo: quanti ne mancano e, per l'anno in corso, se si è in linea con il calendario.
@@ -1391,13 +1429,18 @@ function renderYear() {
       ${author && author[1] > 1 ? `<button class="ystat ystat-link" data-author="${esc(author[0])}"><span>Autore più letto</span><strong>${esc(author[0])} (${author[1]}) ›</strong></button>` : ''}
       ${cell('Il più lungo', longest ? esc(longest.title) + ' · ' + longest.pages + ' pag.' : '')}
       ${cell('Ascoltati su Audible', heard || '')}
+      ${cell('Giorni per libro', avgDays ? 'in media ' + avgDays : '')}
     </div>` : ''}
+    ${reading.length ? `<h3>Sta${W ? '' : 'te'} leggendo</h3><div class="hist">${reading.map((b) => { const r = readsOf(b).filter((x) => !x.end && x.start && (!W || x.who === W)).pop();
+      return `<button class="hist-row" data-id="${esc(b.id)}"><strong>«${esc(b.title)}»</strong><span>${W ? '' : esc(r.who || '') + (r.who ? ' · ' : '')}dal ${fmtDay(r.start)} · da ${daysBetween(r.start, today())} giorni</span></button>`; }).join('')}</div>` : ''}
+    ${history.length ? `<h3>Storico del ${yearSel}</h3><div class="hist">${history.map(({ b, e }) => `<button class="hist-row" data-id="${esc(b.id)}"><strong>«${esc(b.title)}»</strong>
+      <span>${W ? '' : esc(e.who || '') + (e.who ? ' · ' : '')}${e.start ? 'dal ' + fmtDay(e.start) + ' al ' + fmtDay(e.end) + ' · ' + daysBetween(e.start, e.end) + (daysBetween(e.start, e.end) === 1 ? ' giorno' : ' giorni') : 'finito il ' + fmtDay(e.end)}</span></button>`).join('')}</div>` : ''}
     ${months.some(Boolean) ? `<h3>Mese per mese</h3><div class="months">${months.map((m, i) => `<div class="month"><i style="height:${Math.round((m / maxM) * 100)}%"></i><b>${m || ''}</b><span>${'GFMAMGLASOND'[i]}</span></div>`).join('')}</div>` : ''}
     ${best.length ? `<h3>I più amati</h3><div class="year-covers">${best.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}<span>${starsStr(b.rating)}</span></button>`).join('')}</div>` : ''}
     ${n ? `<h3>Tutti i letti del ${yearSel}</h3><div class="year-covers">${read.map((b) => `<button class="year-cover" data-id="${esc(b.id)}">${coverHtml(b, true)}</button>`).join('')}</div>`
       : `<div class="empty"><strong>Ancora nessun libro letto nel ${yearSel}</strong>Quando segnate un libro come «Letto», qui compare con la sua copertina.</div>`}
     ${undated ? `<p class="hint">${undated === 1 ? '1 libro letto non ha' : undated + ' libri letti non hanno'} l'anno in «Letto nel», quindi non ${undated === 1 ? 'compare' : 'compaiono'} qui. <button class="link-btn" data-undated>Mostrali</button></p>` : ''}
-    <p class="hint">Contano i libri segnati «Letto» con l'anno in «Letto nel». Ogni libro vale per le persone di «Di chi è».</p>`;
+    <p class="hint">Da oggi le date si segnano da sole: «In corso» è l'inizio, «Letto» la fine, per chi usa il telefono. Per i libri letti prima contano «Letto nel» e «Di chi è».</p>`;
 }
 
 function greeting() {
@@ -1665,10 +1708,29 @@ async function fetchPlot(book) {
 }
 
 function openView(book) {
+  readsEditing = false;
   fetchPlot(book);
   renderView(book);
   show('view');
   $('view-body').scrollTop = 0;
+}
+
+/* Le letture del libro nella scheda: chi, dal, al. Si correggono qui (le date le mette l'app da sola). */
+let readsEditing = false;
+function readsHtml(b) {
+  if (b.list) return '';
+  const L = readsOf(b);
+  if (!L.length && !readsEditing) return b.status === 'read' || b.status === 'reading' ? `<button class="link-btn reads-add" data-act="reads-edit">＋ Aggiungi le date di lettura</button>` : '';
+  const line = (r) => `${r.who ? esc(r.who) + ' · ' : ''}${r.start ? 'dal ' + fmtDay(r.start) : 'inizio non segnato'}${r.end ? ' al ' + fmtDay(r.end) + (r.start ? ' · ' + daysBetween(r.start, r.end) + (daysBetween(r.start, r.end) === 1 ? ' giorno' : ' giorni') : '') : ' · in corso'}`;
+  if (!readsEditing) return `<p class="view-label">Letture <button class="link-btn" data-act="reads-edit">Correggi</button></p>
+    <ul class="reads">${L.map((r) => `<li>${line(r)}</li>`).join('')}</ul>`;
+  const who = (r) => `<select data-r="${esc(r.id)}" data-f="who"><option value="">Chi?</option>${state.owners.map((o) => `<option${o === r.who ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  return `<p class="view-label">Letture <button class="link-btn" data-act="reads-done">Fatto</button></p>
+    <div class="reads-edit">${L.map((r) => `<div class="reads-row">${who(r)}
+      <label>Dal <input type="date" data-r="${esc(r.id)}" data-f="start" value="${esc(r.start || '')}"></label>
+      <label>Al <input type="date" data-r="${esc(r.id)}" data-f="end" value="${esc(r.end || '')}"></label>
+      <button class="link-btn danger" data-act="reads-del" data-r="${esc(r.id)}">Togli</button></div>`).join('')}
+      <button class="link-btn" data-act="reads-new">＋ Aggiungi una lettura</button></div>`;
 }
 
 function renderView(b) {
@@ -1712,6 +1774,7 @@ function renderView(b) {
     ${b.plot ? `<p class="view-label">Trama</p><p class="plot${b.plot.length > 320 ? ' clamp' : ''}" id="view-plot">${esc(b.plot)}</p>${b.plot.length > 320 ? '<button class="link-btn" data-act="plot">Leggi tutto</button>' : ''}` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
     ${b.notes ? `<p class="view-label">Commento e note</p><p class="view-comment">${esc(b.notes)}</p>` : ''}
+    ${readsHtml(b)}
     ${quotesHtml(b)}
     ${links.length ? `<p class="view-label">Dove trovarlo</p><div class="stores">${links.map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' ')}</div>` : ''}
     ${b.list && claims[b.id] ? `<p class="view-claim">🎁 ${claimName(b.id) ? `Lo prende <strong>${esc(claimName(b.id))}</strong>` : 'Qualcuno ha già preso questo libro'}, dal link della lista.
@@ -2562,6 +2625,9 @@ function runImport() {
       media: importOpts.media === 'paper' ? ['paper'] : [importOpts.media], series: r.series, seriesNum: r.seriesNum,
     };
     if (r.barcode) b.barcode = r.barcode;
+    // Data di fine lettura (Goodreads «Date Read», ecc.) nello storico della persona scelta.
+    const dm = !wish && r.status === 'read' && String(r.readAt).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (dm) b.reads = [{ id: newId(), who: b.owners.length === 1 ? b.owners[0] : '', start: '', end: dm[3] + '-' + dm[2] + '-' + dm[1] }];
     if (wish) b.media = importOpts.media === 'paper' ? [] : [importOpts.media];
     state.books.push(b);
     const lookup = importOpts.complete && navigator.onLine && (r.isbn || r.title);
@@ -3230,6 +3296,19 @@ function init() {
   $('view').addEventListener('touchcancel', endDrag, { passive: true });
   $('view-close').addEventListener('click', () => hide('view'));
   $('view-edit').addEventListener('click', () => { const b = state.books.find((x) => x.id === viewId); if (b) openBook(b); });
+  $('view-body').addEventListener('change', (e) => {
+    const f = e.target.dataset && e.target.dataset.f;
+    if (!f) return;
+    const b = state.books.find((x) => x.id === viewId);
+    const r = b && readsOf(b).find((x) => x.id === e.target.dataset.r);
+    if (!r) return;
+    r[f] = e.target.value;
+    if (f === 'end' && r.end && b.status !== 'read') setStatus(b, 'read', { bulk: true });
+    if (r.end) b.readAt = new Date(r.end + 'T12:00:00').toLocaleDateString('it-IT');
+    b.updatedAt = Date.now();
+    saveState();
+    renderList();
+  });
   $('view-body').addEventListener('click', (e) => {
     const go = e.target.closest('[data-goto]');
     if (go) {
@@ -3300,6 +3379,10 @@ function init() {
       return;
     }
     if (btn.dataset.act === 'unclaim') { unclaimBook(b.id); return; }
+    if (btn.dataset.act === 'reads-edit') { readsEditing = true; if (!readsOf(b).length) b.reads = [{ id: newId(), who: readerFor(b), start: '', end: b.status === 'read' ? today() : '' }]; renderView(b); return; }
+    if (btn.dataset.act === 'reads-done') { readsEditing = false; b.reads = readsOf(b).filter((r) => r.start || r.end); b.updatedAt = Date.now(); saveState(); renderView(b); return; }
+    if (btn.dataset.act === 'reads-new') { b.reads = [...readsOf(b), { id: newId(), who: readerFor(b), start: '', end: '' }]; renderView(b); return; }
+    if (btn.dataset.act === 'reads-del') { b.reads = readsOf(b).filter((r) => r.id !== btn.dataset.r); b.updatedAt = Date.now(); saveState(); renderView(b); return; }
     if (btn.dataset.act === 'reveal') { claimRevealed.add(b.id); renderView(b); renderList(); return; }
     if (btn.dataset.act === 'returned') { b.loanTo = ''; b.loanDate = ''; }
     if (btn.dataset.act === 'bought') { const had = mediaOf(b); b.list = ''; b.media = ['paper', ...had]; if (!b.boughtAt) b.boughtAt = today(); }
@@ -3450,7 +3533,7 @@ function init() {
   $('bulk-status').addEventListener('click', (e) => {
     const c = e.target.closest('[data-status]'); if (!c) return;
     const s = c.classList.contains('on') ? '' : c.dataset.status;
-    bulkApply((b) => setStatus(b, s));
+    bulkApply((b) => setStatus(b, s, { bulk: true }));
   });
   $('bulk-genres').addEventListener('click', (e) => {
     const c = e.target.closest('[data-genre]'); if (!c) return;
@@ -3567,7 +3650,7 @@ function init() {
     const btn = e.target.closest('[data-status]');
     if (!btn) return;
     const s = btn.classList.contains('on') ? '' : btn.dataset.status;
-    batchApply((b) => setStatus(b, s));
+    batchApply((b) => setStatus(b, s, { bulk: true }));
   });
   $('batch-list').addEventListener('click', (e) => {
     const row = e.target.closest('[data-id]');

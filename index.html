@@ -8,15 +8,15 @@
 <script>document.documentElement.dataset.theme = 'night';</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Libreria">
-<link rel="manifest" href="manifest.webmanifest?v=76">
-<link rel="icon" href="icons/icon.svg?v=76" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/icon-180.png?v=76">
+<link rel="manifest" href="manifest.webmanifest?v=77">
+<link rel="icon" href="icons/icon.svg?v=77" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png?v=77">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=76">
+<link rel="stylesheet" href="style.css?v=77">
 </head>
 <body>
 
@@ -461,6 +461,10 @@
     <p class="hint">Serve per il saluto in cima alla libreria. Quando ci saranno gli accessi, lo saprà da solo.</p>
     <div class="chips" id="me-pick"></div>
 
+    <h3>Come vedere i voti</h3>
+    <p class="hint">Il voto è sempre lo stesso, cambia solo come si legge: 7,4 su 10 sono 3,7 stelle su 5. Vale per questo telefono.</p>
+    <div class="chips" id="scale-pick"></div>
+
     <h3>Persone</h3>
     <p class="hint">Di chi sono i libri. Tocca un nome per cambiarlo: cambia in tutti i libri. Si elimina solo chi non ha libri.</p>
     <div id="owner-list" class="genre-list"></div>
@@ -515,7 +519,7 @@
 <div class="peek" id="review" hidden role="dialog" aria-labelledby="review-title">
   <div class="peek-card" id="review-card">
     <h2 id="review-title"></h2>
-    <div class="stars" id="review-stars" role="group" aria-label="Voto da 1 a 5 stelle"></div>
+    <div class="stars" id="review-stars" role="group" aria-label="Voto"></div>
     <label class="review-when">Finito nel <input id="review-when" type="text" placeholder="es. 2026 o 12/03/2026" aria-label="Quando l'hai finito"></label>
     <textarea id="review-text" rows="4" placeholder="Cosa ne pensi? Due righe bastano (facoltativo)" aria-label="La tua recensione"></textarea>
     <div class="row">
@@ -571,9 +575,9 @@
 <div class="toast" id="toast" hidden role="status"></div>
 <div class="update-bar" id="update-bar" hidden role="status"><span>C'è una versione nuova dell'app</span><button class="btn primary" id="update-go">Aggiorna</button></div>
 
-<script src="vendor/zxing.min.js?v=76"></script>
-<script src="app.js?v=76"></script>
-<script src="vendor/supabase.min.js?v=76"></script>
-<script src="cloud.js?v=76"></script>
+<script src="vendor/zxing.min.js?v=77"></script>
+<script src="app.js?v=77"></script>
+<script src="vendor/supabase.min.js?v=77"></script>
+<script src="cloud.js?v=77"></script>
 </body>
 </html>

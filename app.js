@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 /* Numero di versione: va aumentato a ogni modifica, qui e nei ?v= di index.html,
    così il telefono scarica i file nuovi invece di usare quelli in memoria. */
-const APP_VERSION = 76; // va tenuto uguale al numero in version.json
+const APP_VERSION = 77; // va tenuto uguale al numero in version.json
 
 const STORAGE_KEY = 'libreria.v1';
 const DEFAULT_GENRES = [
@@ -637,7 +637,7 @@ function gridCellHtml(b) {
     ? `<img src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${initial}">`
     : `<span class="ph-title">${esc(b.title || 'Senza titolo')}</span><span class="ph-rule"></span><span class="ph-author">${esc(firstAuthor(b.authors))}</span>`;
   return `<button class="cell${b.id === lastAddedId ? ' new' : ''}${selecting && selected.has(b.id) ? ' sel' : ''}" data-id="${esc(b.id)}">
-    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${b.list && claims[b.id] ? `<span class="badge claim-badge">🎁 ${esc(claimName(b.id) || 'Preso')}</span>` : ''}${Number(b.rating) > 0 ? `<span class="rating-badge" role="img" aria-label="Voto ${fmtRating(b.rating)} su 5"><b>★</b>${fmtRating(b.rating)}</span>` : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
+    <span class="cell-cover" style="background:${color};color:${inkOn(color)}">${inner}${b.status === 'reading' ? '<span class="badge">In corso</span>' : ''}${b.loanTo ? '<span class="badge loan-badge">In prestito</span>' : ''}${b.list && claims[b.id] ? `<span class="badge claim-badge">🎁 ${esc(claimName(b.id) || 'Preso')}</span>` : ''}${Number(b.rating) > 0 ? ratingBadge(b.rating) : ''}${mediaBadges(b) ? `<span class="media-badges">${mediaBadges(b)}</span>` : ''}</span>
     <span class="cell-title">${esc(b.title || 'Senza titolo')}</span>
     ${b.list && Number(b.price) > 0 ? `<span class="cell-price">${euro(b.price)}</span>` : ''}
   </button>`;
@@ -1197,7 +1197,7 @@ function suggCell(it, opts = {}) {
     ? `<img src="${esc(httpsUrl(it.cover))}" alt="" loading="lazy" referrerpolicy="no-referrer" data-initial="${esc((it.title || '?').charAt(0))}" data-ph="${esc(phInner(it))}" data-color="${esc(color)}">`
     : phInner(it);
   return `<button class="cell disc" data-sugg="${i}">
-    <span class="cell-cover${it.cover ? '' : ' ph-cover'}" style="background:${color};color:${inkOn(color)}">${inner}${opts.rank ? `<span class="rank-badge">${opts.rank}</span>` : ''}${Number(it.stars) ? `<span class="rating-badge" aria-label="Voto medio dei lettori ${fmtRating(Math.round(it.stars * 10) / 10)} su 5"><b>★</b>${fmtRating(Math.round(it.stars * 10) / 10)}</span>` : ''}${own ? `<span class="badge own-badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
+    <span class="cell-cover${it.cover ? '' : ' ph-cover'}" style="background:${color};color:${inkOn(color)}">${inner}${opts.rank ? `<span class="rank-badge">${opts.rank}</span>` : ''}${Number(it.stars) ? ratingBadge(Math.round(it.stars * 10) / 10, 'Voto medio dei lettori') : ''}${own ? `<span class="badge own-badge">${own.list ? 'Nei desideri' : 'Ce l\'avete'}</span>` : ''}</span>
     ${opts.caption ? `<span class="disc-reason">${esc(opts.caption)}</span>` : ''}
   </button>`;
 }
@@ -1250,7 +1250,7 @@ function renderSugg() {
         ${author ? `<button class="link-btn sugg-author" data-sugg-author="${esc(author)}">${esc(it.authors)} ›</button>` : ''}
         ${meta ? `<p class="sugg-meta">${esc(meta)}</p>` : ''}
         ${it.reason ? `<p class="sugg-reason">✨ ${esc(it.reason)}</p>` : ''}
-        ${Number(it.stars) ? `<p class="sugg-meta">Voto medio dei lettori: ★ ${fmtRating(Math.round(it.stars * 10) / 10)} su 5</p>` : ''}
+        ${Number(it.stars) ? `<p class="sugg-meta">Voto medio dei lettori: ★ ${fmtRating(Math.round(it.stars * 10) / 10)} ${ofScale()}</p>` : ''}
       </div>
     </div>
     <p class="sugg-plot">${it.plot ? (it.plot.length > 280 && !it.plotOpen
@@ -1424,7 +1424,7 @@ function renderYear() {
     <div class="goal-set"><input id="goal-n" type="number" inputmode="numeric" min="0" max="999" placeholder="Quanti?" value="${goal || ''}" aria-label="Obiettivo di libri per il ${yearSel}"><button class="btn ghost" id="goal-save">${goal ? 'Cambia obiettivo' : 'Imposta obiettivo'}</button></div>
     ${n ? `<div class="ystats">
       ${cell('Pagine lette', pages ? pages.toLocaleString('it-IT') : '')}
-      ${cell('Voto medio', avg ? avg.toFixed(1).replace('.', ',') + ' ★' : '')}
+      ${cell('Voto medio', avg ? '★ ' + fmtRating(avg) + ' ' + ofScale() : '')}
       ${cell('Genere preferito', genre ? esc(genre[0]) : '')}
       ${author && author[1] > 1 ? `<button class="ystat ystat-link" data-author="${esc(author[0])}"><span>Autore più letto</span><strong>${esc(author[0])} (${author[1]}) ›</strong></button>` : ''}
       ${cell('Il più lungo', longest ? esc(longest.title) + ' · ' + longest.pages + ' pag.' : '')}
@@ -2013,44 +2013,62 @@ function renderFormOwners() {
     .join('');
 }
 
-/* ---------- Stelle: voto da 0,5 a 5 a mezze stelle ---------- */
-const fmtRating = (r) => String(Number(r) || 0).replace('.', ',');
-const starsStr = (r) => { r = Number(r) || 0; return '★'.repeat(Math.floor(r)) + (r % 1 ? '½' : ''); };
-const starsShow = (r) => `<span class="stars-show" style="--r:${Number(r) || 0}" role="img" aria-label="${fmtRating(r)} stelle su 5">★★★★★</span>`;
-function starsButtons(v) {
-  return [1, 2, 3, 4, 5].map((n) => `<button type="button" class="${n <= v ? 'on' : n - 0.5 === v ? 'half' : ''}" data-star="${n}" aria-label="${n} su 5" aria-pressed="${n === v}">★</button>`).join('')
-    + `<span class="stars-val">${v ? fmtRating(v) : ''}</span>`;
+/* ---------- Voto fluido (v77) ----------
+   Il voto si salva come prima, in stelle da 0 a 5, ma a decimi di punto su 10 (3,7 stelle = 7,4 su 10).
+   Si dà con un cursore; il colore scorre senza scatti: rosso, arancione, giallo, verde, blu.
+   Ognuno sceglie dalle Impostazioni se vederlo «su 10» o «su 5» (vale per questo telefono). */
+const RATE_STOPS = [[226, 87, 76], [238, 138, 60], [233, 197, 72], [107, 191, 89], [76, 155, 232]];
+const RATE_WORDS = ['Pessimo', 'Brutto', 'Deludente', 'Mediocre', 'Sufficiente', 'Discreto', 'Buono', 'Molto bello', 'Bellissimo', 'Capolavoro'];
+const rateScale = () => (pref('libreria.scale', '10') === '5' ? 5 : 10);
+function ratingColor(r) {
+  const t = Math.max(0, Math.min(1, ((Number(r) || 0) * 2 - 1) / 9)) * 4;
+  const i = Math.min(3, Math.floor(t)), f = t - i, a = RATE_STOPS[i], z = RATE_STOPS[i + 1];
+  return 'rgb(' + [0, 1, 2].map((k) => Math.round(a[k] + (z[k] - a[k]) * f)).join(',') + ')';
 }
-/* Si vota toccando una stella o facendo scorrere il dito sopra: la metà sinistra di una stella vale mezzo punto.
-   Toccare di nuovo lo stesso voto lo toglie. */
+const ratingWord = (r) => RATE_WORDS[Math.min(9, Math.max(0, Math.round((Number(r) || 0) * 2) - 1))];
+const fmtRating = (r) => {
+  const n = Math.round((Number(r) || 0) * (rateScale() === 10 ? 20 : 10)) / 10;
+  return (Number.isInteger(n) ? String(n) : n.toFixed(1)).replace('.', ',');
+};
+const ofScale = () => 'su ' + rateScale();
+const starsStr = (r) => '★ ' + fmtRating(r) + (rateScale() === 5 ? '' : '/10');
+const starsShow = (r) => `<span class="stars-show" style="--r:${Number(r) || 0};--s-on:${ratingColor(r)}" role="img" aria-label="Voto ${fmtRating(r)} ${ofScale()}">★★★★★</span>`;
+const ratingBadge = (r, label) => `<span class="rating-badge" role="img" aria-label="${label || 'Voto'} ${fmtRating(r)} ${ofScale()}" style="background:${ratingColor(r)}"><b>★</b>${fmtRating(r)}</span>`;
+function starsButtons(v) {
+  return `<div class="rate${v ? '' : ' empty'}">
+    <div class="rate-top"><b class="rate-num"></b><span class="rate-of"></span><span class="rate-word"></span>
+      <button type="button" class="link-btn rate-clear">Togli</button></div>
+    <span class="rate-stars" aria-hidden="true">★★★★★</span>
+    <input type="range" class="rate-range" min="1" max="10" step="0.1" aria-label="Voto da 1 a 10">
+    <div class="rate-ends" aria-hidden="true"><span>Non mi è piaciuto</span><span>Capolavoro</span></div>
+  </div>`;
+}
+/* Aggiorna il voto senza ridisegnare il cursore: così il dito non perde la presa mentre lo trascina. */
+function paintRate(el, v) {
+  if (!el.querySelector('.rate')) el.innerHTML = starsButtons(v);
+  const box = el.querySelector('.rate'), c = v ? ratingColor(v) : '';
+  box.classList.toggle('empty', !v);
+  box.style.setProperty('--rc', c || 'var(--muted)');
+  box.querySelector('.rate-num').textContent = v ? fmtRating(v) : '–';
+  box.querySelector('.rate-of').textContent = v ? ofScale() : '';
+  box.querySelector('.rate-word').textContent = v ? ratingWord(v) : 'Trascina per dare il voto';
+  box.querySelector('.rate-clear').hidden = !v;
+  box.querySelector('.rate-stars').style.setProperty('--r', v || 0);
+  const range = box.querySelector('.rate-range');
+  if (document.activeElement !== range || !v) range.value = v ? Math.round(v * 20) / 10 : 5.5;
+  range.setAttribute('aria-valuetext', v ? fmtRating(v) + ' ' + ofScale() + ', ' + ratingWord(v) : 'Nessun voto');
+}
 function bindStars(el, get, set) {
-  let start = 0, moved = false, active = false;
-  const valueAt = (x) => {
-    const btns = el.querySelectorAll('[data-star]');
-    const left = btns[0].getBoundingClientRect().left, right = btns[4].getBoundingClientRect().right;
-    return Math.max(0.5, Math.min(5, Math.ceil(((x - left) / (right - left)) * 10) / 2));
-  };
-  el.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest('[data-star]')) return;
-    active = true; moved = false; start = get();
-    try { el.setPointerCapture(e.pointerId); } catch (err) { /* niente */ }
-    set(valueAt(e.clientX));
+  el.addEventListener('input', (e) => {
+    if (!e.target.classList.contains('rate-range')) return;
+    set(Math.round(Number(e.target.value) * 10) / 20);
   });
-  el.addEventListener('pointermove', (e) => { if (!active) return; const v = valueAt(e.clientX); if (v !== get()) { moved = true; set(v); } });
-  const end = () => {
-    if (!active) return;
-    active = false;
-    if (!moved && get() === start) set(0);
-    if (navigator.vibrate) navigator.vibrate(8);
-  };
-  el.addEventListener('pointerup', end);
-  el.addEventListener('pointercancel', () => { active = false; });
-  // Tastiera: Invio sulla stella dà il voto pieno.
-  el.addEventListener('click', (e) => { const b = e.target.closest('[data-star]'); if (b && e.detail === 0) set(get() === Number(b.dataset.star) ? 0 : Number(b.dataset.star)); });
+  el.addEventListener('change', (e) => { if (e.target.classList.contains('rate-range') && navigator.vibrate) navigator.vibrate(8); });
+  el.addEventListener('click', (e) => { if (e.target.closest('.rate-clear')) set(0); });
 }
 
 function renderFormRating() {
-  $('f-rating').innerHTML = starsButtons(current.rating);
+  paintRate($('f-rating'), current.rating);
 }
 
 function renderFormLists() {
@@ -2122,7 +2140,7 @@ function readForm() {
    Si può sempre rimandare: voto e commento restano modificabili dalla scheda. */
 let reviewId = '', reviewStars = 0;
 function renderReviewStars() {
-  $('review-stars').innerHTML = starsButtons(reviewStars);
+  paintRate($('review-stars'), reviewStars);
 }
 function openReview(b) {
   reviewId = b.id;
@@ -2989,6 +3007,8 @@ function renderSettings() {
     </div>`;
   }).join('');
   const me = pref('libreria.me', '');
+  const sc = rateScale();
+  $('scale-pick').innerHTML = [[10, 'Su 10'], [5, 'Su 5 stelle']].map(([k, l]) => `<button type="button" class="chip${k === sc ? ' on' : ''}" data-scale="${k}" aria-pressed="${k === sc}">${l}</button>`).join('');
   $('me-pick').innerHTML = state.owners.map((o) => `<button type="button" class="chip${o === me ? ' on' : ''}" data-me="${esc(o)}" aria-pressed="${o === me}">${esc(o)}</button>`).join('');
   $('owner-list').innerHTML = state.owners.map((o, i) => {
     const used = state.books.filter((b) => ownersOf(b).includes(o)).length;
@@ -3563,6 +3583,13 @@ function init() {
     try { await installEvent.userChoice; } catch (err) { /* scelta annullata */ }
     installEvent = null;
     renderInstall();
+  });
+  $('scale-pick').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-scale]');
+    if (!chip) return;
+    setPref('libreria.scale', chip.dataset.scale);
+    renderSettings();
+    renderList();
   });
   $('me-pick').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-me]');

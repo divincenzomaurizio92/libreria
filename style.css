@@ -1026,3 +1026,28 @@ body[data-page="wish"] .tabs { display: none; }
 .home-year-bar { display: block; height: 9px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; }
 .home-year-bar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .home-tiles { margin-top: 12px; }
+
+/* ---------- v77: voto fluido a colori sfumati ---------- */
+.stars:has(.rate) { display: block; touch-action: auto; }
+.rate { --rc: var(--muted); display: grid; gap: 6px; width: 100%; max-width: 420px; }
+#review-card .rate { margin: 0 auto; text-align: left; }
+.rate-top { display: flex; align-items: baseline; gap: 8px; min-height: 44px; }
+.rate-num { font: 700 34px/1 var(--font-body); color: var(--rc); font-variant-numeric: tabular-nums; }
+.rate-of { font-weight: 600; color: var(--muted); font-size: 15px; }
+.rate-word { font: 600 18px var(--font-display); color: var(--rc); margin-left: auto; text-align: right; }
+.rate.empty .rate-word { font: 500 15px var(--font-body); color: var(--muted); }
+.rate-clear { padding: 6px 0 6px 10px; font-size: 14px; }
+.rate-stars { font-size: 30px; letter-spacing: 3px; line-height: 1; color: transparent; background: linear-gradient(90deg, var(--rc) calc(var(--r, 0) * 20%), color-mix(in srgb, var(--ink) 22%, transparent) 0); -webkit-background-clip: text; background-clip: text; width: max-content; }
+.rate-range { -webkit-appearance: none; appearance: none; width: 100%; height: 44px; margin: 0; background: transparent; cursor: pointer; border: 0; padding: 0; }
+.rate-range::-webkit-slider-runnable-track { height: 14px; border-radius: 999px; background: linear-gradient(90deg, #E2574C 0%, #EE8A3C 25%, #E9C548 50%, #6BBF59 75%, #4C9BE8 100%); }
+.rate-range::-moz-range-track { height: 14px; border-radius: 999px; background: linear-gradient(90deg, #E2574C 0%, #EE8A3C 25%, #E9C548 50%, #6BBF59 75%, #4C9BE8 100%); }
+.rate-range::-webkit-slider-thumb { -webkit-appearance: none; width: 34px; height: 34px; margin-top: -10px; border-radius: 50%; background: var(--ink); border: 4px solid var(--bg); box-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+.rate-range::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--ink); border: 4px solid var(--bg); }
+.rate.empty .rate-range { opacity: .55; }
+.rate.empty .rate-range::-webkit-slider-thumb { background: var(--muted); }
+.rate-range:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 999px; }
+.rate-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+/* Bollino sulle copertine: il colore del voto, testo scuro. */
+.rating-badge { color: #1F1712; }
+.rating-badge b { color: inherit; opacity: .8; }
+.rate .rate-clear, #review-card .rate .rate-clear { flex: 0 0 auto; width: auto; min-height: 0; font: 600 14px var(--font-body); padding: 6px 0 6px 10px; background: none; border: 0; }
